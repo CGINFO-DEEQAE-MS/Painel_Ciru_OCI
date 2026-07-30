@@ -6,20 +6,31 @@ library(data.table)
 library(readxl)
 library(stringi)
 
-#### CAMINHOS (projetos irmãos) ####
+#### CAMINHOS ####
 
-CIRURGIA_DIR <- normalizePath(file.path("..", "Cirurgia"))
-OCI_DIR      <- normalizePath(file.path("..", "OCI"))
+# O painel lê sempre de uma cópia local (dados/processados), para funcionar
+# tanto local quanto publicado no shinyapps.io (que não tem acesso às pastas
+# irmãs). Essa pasta é ignorada pelo .gitignore — nunca vai para o GitHub.
+DADOS_LOCAIS <- file.path("dados", "processados")
+dir.create(DADOS_LOCAIS, recursive = TRUE, showWarnings = FALSE)
 
-DIR_TABELAS_CIRURGIA <- file.path(
-  CIRURGIA_DIR, "resultados", "tabelas", "monitoramento_diagrama_controle"
-)
-DIR_RESULT_OCI <- file.path(OCI_DIR, "resultados")
+DIR_TABELAS_CIRURGIA <- DADOS_LOCAIS
+DIR_RESULT_OCI       <- DADOS_LOCAIS
+
+# Projetos irmãos (só existem em execução local; ausentes quando publicado).
+CIRURGIA_DIR_ORIGEM <- normalizePath(file.path("..", "Cirurgia"), mustWork = FALSE)
+OCI_DIR_ORIGEM      <- normalizePath(file.path("..", "OCI"), mustWork = FALSE)
 
 MES_LABELS <- c(
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
   "Jul", "Ago", "Set", "Out", "Nov", "Dez"
 )
+
+# Rótulos "Mês/AA" em português para eixos de data (o Plotly só formata
+# datas em inglês por padrão, sem carregar um locale de JS à parte).
+rotular_mes_ano_pt <- function(datas) {
+  paste0(MES_LABELS[as.integer(format(datas, "%m"))], "/", format(datas, "%y"))
+}
 
 CORES_CLASSIFICACAO <- c(
   "Esperado"                           = "#479139",
@@ -151,7 +162,36 @@ carregar_status_oci <- function() {
   dt[]
 }
 
+# Copia as planilhas mais recentes dos projetos irmãos para dados/processados.
+# Só roda quando esses projetos existem localmente (dev no RStudio); no
+# shinyapps.io eles não existem e a função não faz nada, mantendo a última
+# cópia publicada.
+sincronizar_dados_locais <- function() {
+
+  if (!dir.exists(CIRURGIA_DIR_ORIGEM) || !dir.exists(OCI_DIR_ORIGEM)) {
+    return(invisible(FALSE))
+  }
+
+  origem_cirurgia <- file.path(
+    CIRURGIA_DIR_ORIGEM, "resultados", "tabelas", "monitoramento_diagrama_controle"
+  )
+  origem_oci <- file.path(OCI_DIR_ORIGEM, "resultados")
+
+  arquivos <- c(
+    localizar_arquivo(origem_cirurgia, "^serie_completa_rol_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_completa_total_.*\\.csv$"),
+    localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
+    localizar_arquivo(origem_oci, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$")
+  )
+  arquivos <- arquivos[!is.na(arquivos)]
+
+  file.copy(arquivos, DADOS_LOCAIS, overwrite = TRUE)
+
+  invisible(TRUE)
+}
+
 carregar_tudo <- function() {
+  sincronizar_dados_locais()
   list(
     cirurgia_rol   = carregar_serie_cirurgia("rol"),
     cirurgia_total = carregar_serie_cirurgia("total"),
@@ -232,7 +272,16 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
 
   cores_pontos <- unname(CORES_CLASSIFICACAO[moni$classificacao])
 
-  plot_ly() |>
+  # Como os pontos de "Produção <ano>" são um único trace com cor variável
+  # por classificação, o Plotly não gera legenda para cada cor sozinho.
+  # Os traces abaixo existem só para aparecer na legenda (sem desenhar nada
+  # no gráfico), facilitando a leitura rápida das cores de classificação.
+  niveis_classificacao <- c(
+    "Esperado", "Acima do esperado", "Acima do limite esperado",
+    "Atenção", "Crítico abaixo do limite esperado"
+  )
+
+  p <- plot_ly() |>
     add_ribbons(
       data = faixa, x = ~mes, ymin = ~limite_inferior, ymax = ~limite_superior,
       name = "Faixa histórica (min-máx)", fillcolor = "rgba(120,120,120,0.15)",
@@ -259,28 +308,43 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
       marker = list(size = 9, color = cores_pontos, line = list(color = "black", width = 0.5)),
       text = ~classificacao,
       hovertemplate = "Mês: %{x}<br>Quantidade: %{y:,.0f}<br>%{text}<extra></extra>"
-    ) |>
+    )
+
+  for (nivel in niveis_classificacao) {
+    p <- add_trace(
+      p, x = list(NA), y = list(NA), type = "scatter", mode = "markers",
+      marker = list(size = 9, color = CORES_CLASSIFICACAO[[nivel]]),
+      name = nivel, showlegend = TRUE, hoverinfo = "skip"
+    )
+  }
+
+  p |>
     layout(
       title = list(text = titulo, x = 0),
       xaxis = list(title = "Mês de competência", tickmode = "array", tickvals = 1:12, ticktext = MES_LABELS),
       yaxis = list(title = "Quantidade", tickformat = ",.0f", rangemode = "tozero"),
       hovermode = "x unified",
-      legend = list(orientation = "h", y = -0.3),
-      margin = list(b = 90)
+      legend = list(orientation = "h", y = -0.2),
+      margin = list(b = 90),
+      separators = ",."
     )
 }
 
 grafico_oci <- function(dados, titulo) {
 
   d <- dados[order(competencia)]
+  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
   ultimo <- d[which.max(competencia)]
+
+  datas_unicas <- sort(unique(d$competencia))
 
   plot_ly() |>
     add_trace(
       data = d, x = ~competencia, y = ~oci, type = "scatter", mode = "lines",
       fill = "tozeroy", fillcolor = "rgba(24,95,165,0.10)",
       line = list(color = "#185FA5", width = 2.2), name = "OCI realizadas",
-      hovertemplate = "%{x|%b/%Y}<br>OCI: %{y:,.0f}<extra></extra>"
+      text = ~rotulo_mes,
+      hovertemplate = "%{text}<br>OCI: %{y:,.0f}<extra></extra>"
     ) |>
     add_trace(
       data = ultimo, x = ~competencia, y = ~oci, type = "scatter", mode = "markers",
@@ -289,17 +353,51 @@ grafico_oci <- function(dados, titulo) {
     ) |>
     layout(
       title = list(text = titulo, x = 0),
-      xaxis = list(title = "Mês de competência"),
+      xaxis = list(
+        title = "Mês de competência",
+        tickmode = "array",
+        tickvals = datas_unicas,
+        ticktext = rotular_mes_ano_pt(datas_unicas),
+        tickangle = -45
+      ),
       yaxis = list(title = "OCI realizadas", tickformat = ",.0f", rangemode = "tozero"),
       shapes = list(list(
         type = "line", x0 = DATA_VIRADA_OCI, x1 = DATA_VIRADA_OCI, y0 = 0, y1 = 1, yref = "paper",
         line = list(color = "#D85A30", dash = "dash", width = 1.2)
       )),
-      showlegend = FALSE
+      showlegend = FALSE,
+      separators = ",.",
+      margin = list(b = 90)
     )
 }
 
 #### UI ####
+
+# Bloco fixo com a origem dos dados, exibido abaixo dos filtros nas duas abas.
+info_fonte_dados <- function() {
+  div(
+    class = "text-muted small mt-3",
+    style = "line-height: 1.4;",
+    p(
+      "Dados públicos disponibilizados pelo Ministério da Saúde por meio do painel ",
+      tags$strong("SUS360"), ":"
+    ),
+    tags$ul(
+      style = "padding-left: 1.1em;",
+      tags$li(tags$a(
+        href = "https://sus360.saude.gov.br/#painel/componente-ambulatorial",
+        target = "_blank", rel = "noopener noreferrer",
+        "Componente Ambulatorial (OCI)"
+      )),
+      tags$li(tags$a(
+        href = "https://sus360.saude.gov.br/painel/cirurgias/",
+        target = "_blank", rel = "noopener noreferrer",
+        "Cirurgias Eletivas"
+      ))
+    ),
+    p(tags$em("Sujeito a alterações."))
+  )
+}
 
 ui <- page_navbar(
   title = "Monitoramento de Produção",
@@ -339,11 +437,20 @@ ui <- page_navbar(
           "regiao_cirurgia", "Região",
           choices = REGIOES, selected = REGIOES
         ),
-        selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL")
+        selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL"),
+        info_fonte_dados()
       ),
-      plotlyOutput("grafico_cirurgia", height = "500px"),
-      h5("Classificação no último mês monitorado"),
-      DTOutput("tabela_status_cirurgia")
+      tabsetPanel(
+        id = "subaba_cirurgia",
+        type = "tabs",
+        tabPanel("Gráfico", br(), plotlyOutput("grafico_cirurgia", height = "72vh")),
+        tabPanel(
+          "Tabela",
+          br(),
+          h5("Classificação no último mês monitorado"),
+          DTOutput("tabela_status_cirurgia")
+        )
+      )
     )
   ),
 
@@ -356,7 +463,8 @@ ui <- page_navbar(
           "regiao_oci", "Região",
           choices = REGIOES, selected = REGIOES
         ),
-        selectInput("uf_oci", "UF", choices = "BRASIL", selected = "BRASIL")
+        selectInput("uf_oci", "UF", choices = "BRASIL", selected = "BRASIL"),
+        info_fonte_dados()
       ),
       plotlyOutput("grafico_oci", height = "500px"),
       h5("Status por UF (variação em relação ao mês anterior)"),
@@ -380,7 +488,7 @@ server <- function(input, output, session) {
     if (is.null(serie_oci)) {
       return("")
     }
-    paste0("  |  OCI atualizado até ", format(max(serie_oci$competencia, na.rm = TRUE), "%m/%Y"))
+    paste0(" | Dados até a competência ", format(max(serie_oci$competencia, na.rm = TRUE), "%m/%Y"))
   })
 
   ## ---- Cirurgias ----
@@ -458,6 +566,7 @@ server <- function(input, output, session) {
       rownames = FALSE,
       options = list(pageLength = 10, order = list(list(3, "asc")))
     ) |>
+      formatRound("quantidade", digits = 0, mark = ".", interval = 3) |>
       formatStyle(
         "classificacao",
         backgroundColor = styleEqual(names(CORES_CLASSIFICACAO), CORES_CLASSIFICACAO)
@@ -515,6 +624,7 @@ server <- function(input, output, session) {
       rownames = FALSE,
       options = list(pageLength = 10, order = list(list(1, "desc")))
     ) |>
+      formatRound(c("ultimo", "anterior"), digits = 0, mark = ".", interval = 3) |>
       formatPercentage("variacao_ultimo_mes", 1)
   })
 }
