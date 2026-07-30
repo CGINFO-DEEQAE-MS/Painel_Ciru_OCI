@@ -1,0 +1,70 @@
+# Histórico e configuração do R
+.Rhistory
+.RData
+.Ruserdata
+
+# Configurações do RStudio
+.Rproj.user/
+
+# Arquivos temporários
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Cache
+cache/
+*_cache/
+cache_html/
+
+# Quarto
+.quarto/
+
+# Shiny
+rsconnect/
+
+# Dados grandes
+dados/raw/
+dados/temp/
+dados/processados/
+
+# Resultados
+resultados/
+
+# Arquivos compactados
+*.zip
+*.7z
+*.rar
+*.tar.gz
+
+# Arquivos Excel temporários
+~$*.xlsx
+~$*.xls
+
+# Tokens e variáveis de ambiente
+.Renviron
+.env
+.env.*
+
+# Pacotes locais (caso utilize renv)
+renv/library/
+renv/staging/
+
+# VS Code
+.vscode/
+
+# Python (caso exista integração)
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Arquivos de backup
+*.Rproj.user
