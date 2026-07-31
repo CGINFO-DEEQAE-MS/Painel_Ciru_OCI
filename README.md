@@ -71,7 +71,7 @@ Na primeira execução, se os projetos `Cirurgia` e `OCI` já tiverem sido proce
 3. No RStudio, com `app.R` aberto, clique em **Publish** — como o app já existe no shinyapps.io, ele é atualizado no mesmo link;
 4. Confirme que os 4 arquivos de `dados/processados/` estão marcados para envio (e nenhum `.RData`, se aparecer).
 
-Publicado em `https://felipecotrim.shinyapps.io/Painel_Ciru_OCI/` (confirme o link no painel do shinyapps.io caso tenha mudado).
+Publicado em `https://felipecotrim.shinyapps.io/Painel_Ciru_OCI/`
 
 ## Status
 
