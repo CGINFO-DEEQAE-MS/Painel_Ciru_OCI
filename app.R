@@ -545,53 +545,34 @@ grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) 
     alta_resolucao("oci_por_especialidade")
 }
 
-grafico_oci_fisico_financeiro <- function(dados, titulo) {
+grafico_oci_fisico_especialidade <- function(dados, titulo) {
 
   d <- dados[order(ESPECIALIDADE, ANO)]
   anos <- sort(unique(d$ANO))
   cores <- cores_para_anos(anos)
 
-  p_fisico <- plot_ly()
-  p_financeiro <- plot_ly()
+  p <- plot_ly()
 
   for (ano_atual in anos) {
     dd <- d[ANO == ano_atual]
-
-    p_fisico <- add_trace(
-      p_fisico, data = dd, x = ~ESPECIALIDADE, y = ~OCI, type = "bar",
+    p <- add_trace(
+      p, data = dd, x = ~ESPECIALIDADE, y = ~OCI, type = "bar",
       name = as.character(ano_atual), marker = list(color = cores[[as.character(ano_atual)]]),
-      legendgroup = as.character(ano_atual),
       hovertemplate = paste0(ano_atual, "<br>%{x}<br>OCI: %{y:,.0f}<extra></extra>")
-    )
-
-    p_financeiro <- add_trace(
-      p_financeiro, data = dd, x = ~ESPECIALIDADE, y = ~VALOR, type = "bar",
-      name = as.character(ano_atual), marker = list(color = cores[[as.character(ano_atual)]]),
-      legendgroup = as.character(ano_atual), showlegend = FALSE,
-      hovertemplate = paste0(ano_atual, "<br>%{x}<br>R$ %{y:,.0f}<extra></extra>")
     )
   }
 
-  p_fisico <- p_fisico |>
-    layout(
-      barmode = "group",
-      yaxis = list(title = "OCI realizadas (físico)", tickformat = ",.0f")
-    )
-
-  p_financeiro <- p_financeiro |>
-    layout(
-      barmode = "group",
-      xaxis = list(title = "Especialidade"),
-      yaxis = list(title = "Valor aprovado (R$)", tickformat = ",.0f")
-    )
-
-  subplot(p_fisico, p_financeiro, nrows = 2, shareX = TRUE, titleY = TRUE, margin = 0.09) |>
+  p |>
     layout(
       title = list(text = titulo, x = 0),
-      legend = list(orientation = "h", y = 1.15),
+      barmode = "group",
+      xaxis = list(title = "Especialidade"),
+      yaxis = list(title = "OCI realizadas (físico)", tickformat = ",.0f"),
+      legend = list(orientation = "h", y = -0.25),
+      margin = list(b = 90),
       separators = ",."
     ) |>
-    alta_resolucao("oci_fisico_financeiro_especialidade")
+    alta_resolucao("oci_fisico_especialidade")
 }
 
 grafico_oci_mensal_anos <- function(dados, titulo) {
@@ -666,7 +647,7 @@ ui <- page_navbar(
          [
            'grafico_cirurgia', 'grafico_comparacao_anos',
            'grafico_oci', 'grafico_oci_especialidade',
-           'grafico_oci_fisico_financeiro', 'grafico_oci_mensal_anos'
+           'grafico_oci_fisico_especialidade', 'grafico_oci_mensal_anos'
          ].forEach(function (id) {
            var el = document.getElementById(id);
            if (el && window.Plotly) { Plotly.Plots.resize(el); }
@@ -742,18 +723,20 @@ ui <- page_navbar(
         tabPanel(
           "Série histórica OCI",
           br(),
-          plotlyOutput("grafico_oci", height = "72vh")
-        ),
-        tabPanel(
-          "Por especialidade",
+          h5("OCI geral"),
+          plotlyOutput("grafico_oci", height = "48vh"),
           br(),
-          plotlyOutput("grafico_oci_especialidade", height = "72vh")
+          h5("Por especialidade"),
+          plotlyOutput("grafico_oci_especialidade", height = "52vh")
         ),
         tabPanel(
           "Comparativos",
           br(),
-          h5("Físico x financeiro por especialidade"),
-          plotlyOutput("grafico_oci_fisico_financeiro", height = "60vh"),
+          h5("Físico por especialidade"),
+          plotlyOutput("grafico_oci_fisico_especialidade", height = "48vh"),
+          br(),
+          h5("Financeiro por especialidade (R$)"),
+          DTOutput("tabela_oci_financeiro"),
           br(),
           h5("Produção mensal — 2025 vs 2026"),
           plotlyOutput("grafico_oci_mensal_anos", height = "45vh")
@@ -990,7 +973,9 @@ server <- function(input, output, session) {
     )
   })
 
-  output$grafico_oci_fisico_financeiro <- renderPlotly({
+  # Base física + financeira por especialidade/ano, reaproveitada pelo
+  # gráfico físico e pela tabela financeira em "Comparativos".
+  oci_especialidade_por_ano <- reactive({
 
     especialidades_sel <- input$especialidades_oci
     validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
@@ -1002,12 +987,36 @@ server <- function(input, output, session) {
     ]
     validate(need(nrow(agregada) > 0, "Sem dados para a seleção atual."))
 
+    agregada
+  })
+
+  output$grafico_oci_fisico_especialidade <- renderPlotly({
+
     rotulo_uf <- if (input$uf_oci == "BRASIL") rotulo_agregado(input$regiao_oci) else input$uf_oci
 
-    grafico_oci_fisico_financeiro(
-      agregada,
-      titulo = paste0("Físico x financeiro por especialidade — ", rotulo_uf)
+    grafico_oci_fisico_especialidade(
+      oci_especialidade_por_ano(),
+      titulo = paste0("Físico por especialidade — ", rotulo_uf)
     )
+  })
+
+  output$tabela_oci_financeiro <- renderDT({
+
+    agregada <- oci_especialidade_por_ano()
+
+    tabela <- dcast(
+      agregada, ESPECIALIDADE ~ ANO,
+      value.var = "VALOR", fun.aggregate = sum, fill = 0
+    )
+    colunas_ano <- setdiff(names(tabela), "ESPECIALIDADE")
+
+    datatable(
+      tabela,
+      colnames = c("Especialidade", colunas_ano),
+      rownames = FALSE,
+      options = list(dom = "t", pageLength = -1, ordering = FALSE)
+    ) |>
+      formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
   })
 
   output$grafico_oci_mensal_anos <- renderPlotly({
