@@ -5,6 +5,8 @@ library(DT)
 library(data.table)
 library(readxl)
 library(stringi)
+library(officer)
+library(mschart)
 
 #### CAMINHOS ####
 
@@ -147,6 +149,25 @@ carregar_serie_anos_cirurgia <- function(indicador) {
   dt[]
 }
 
+# Série multianual por município (Comparação Anos com filtro de Município).
+# Mesmo esquema de carregar_serie_anos_cirurgia(), mais granular.
+carregar_serie_municipio_cirurgia <- function(indicador) {
+
+  arquivo <- localizar_arquivo(
+    DIR_TABELAS_CIRURGIA,
+    paste0("^serie_anos_municipio_", indicador, "_.*\\.csv$")
+  )
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, encoding = "UTF-8")
+  dt[, uf_atendimento := toupper(uf_atendimento)]
+  dt[, municipio_atendimento := toupper(municipio_atendimento)]
+  dt[]
+}
+
 status_cirurgia <- function(serie) {
 
   if (is.null(serie)) {
@@ -217,6 +238,23 @@ carregar_oci_especialidade <- function() {
   dt[]
 }
 
+# Mesmo esquema de carregar_oci_especialidade(), granularidade de município
+# (usado pelo filtro de Município em "Série histórica" e "Comparativos").
+carregar_oci_especialidade_municipio <- function() {
+
+  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^oci_mensal_especialidade_municipio\\.csv$")
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, sep = ";", dec = ",", encoding = "UTF-8")
+  dt[, NM_UF := toupper(NM_UF)]
+  dt[, MUNICIPIO := toupper(MUNICIPIO)]
+  dt[, competencia := as.Date(sprintf("%04d-%02d-01", ANO, MES))]
+  dt[]
+}
+
 # Copia as planilhas mais recentes dos projetos irmãos para dados/processados.
 # Só roda quando esses projetos existem localmente (dev no RStudio); no
 # shinyapps.io eles não existem e a função não faz nada, mantendo a última
@@ -237,9 +275,12 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_completa_total_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_rol_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_total_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$"),
-    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_uf\\.csv$")
+    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_uf\\.csv$"),
+    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_municipio\\.csv$")
   )
   arquivos <- arquivos[!is.na(arquivos)]
 
@@ -255,9 +296,12 @@ carregar_tudo <- function() {
     cirurgia_total = carregar_serie_cirurgia("total"),
     cirurgia_anos_rol = carregar_serie_anos_cirurgia("rol"),
     cirurgia_anos_total = carregar_serie_anos_cirurgia("total"),
+    cirurgia_municipio_rol = carregar_serie_municipio_cirurgia("rol"),
+    cirurgia_municipio_total = carregar_serie_municipio_cirurgia("total"),
     oci_serie = carregar_serie_oci(),
     oci_status = carregar_status_oci(),
-    oci_especialidade = carregar_oci_especialidade()
+    oci_especialidade = carregar_oci_especialidade(),
+    oci_especialidade_municipio = carregar_oci_especialidade_municipio()
   )
 }
 
@@ -324,7 +368,7 @@ agregar_anos_regiao <- function(serie, regioes) {
   ufs <- UF_REF[REGIAO %in% regioes]$NM_UF_CIRURGIA
   serie[
     uf_atendimento %chin% ufs,
-    .(quantidade = sum(quantidade, na.rm = TRUE)),
+    .(quantidade = sum(quantidade, na.rm = TRUE), valor = sum(valor, na.rm = TRUE)),
     by = .(ano, mes)
   ]
 }
@@ -344,6 +388,29 @@ alta_resolucao <- function(p, nome_arquivo = "grafico") {
       height = 900,
       scale = 3
     )
+  )
+}
+
+# Dados brutos por trás de qualquer gráfico, em CSV (";" + decimal ",",
+# mesmo padrão dos demais arquivos do painel).
+handler_csv <- function(dados_fn, nome_arquivo) {
+  downloadHandler(
+    filename = function() paste0(nome_arquivo, "_", format(Sys.Date(), "%Y%m%d"), ".csv"),
+    content = function(file) fwrite(dados_fn(), file, sep = ";", dec = ",", bom = TRUE)
+  )
+}
+
+# Mesmo gráfico como objeto nativo do PowerPoint (officer + mschart), editável
+# depois de aberto — diferente do PNG do Plotly, que é uma imagem estática.
+handler_pptx <- function(construir_fn, nome_arquivo) {
+  downloadHandler(
+    filename = function() paste0(nome_arquivo, "_", format(Sys.Date(), "%Y%m%d"), ".pptx"),
+    content = function(file) {
+      doc <- read_pptx()
+      doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
+      doc <- ph_with(doc, value = construir_fn(), location = ph_location_fullsize())
+      print(doc, target = file)
+    }
   )
 }
 
@@ -420,29 +487,57 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
     alta_resolucao("diagrama_monitoramento_cirurgias")
 }
 
-grafico_comparacao_anos <- function(dados, titulo) {
+grafico_comparacao_anos <- function(dados, titulo, metrica = "fisico") {
 
   d <- dados[order(ano, mes)]
   anos <- sort(unique(d$ano))
   cores <- cores_para_anos(anos)
 
+  coluna_y <- if (metrica == "financeiro") "valor" else "quantidade"
+  rotulo_eixo <- if (metrica == "financeiro") "Valor (R$)" else "Quantidade"
+  prefixo_hover <- if (metrica == "financeiro") "R$ " else ""
+
   p <- plot_ly()
 
   for (ano_atual in anos) {
     dd <- d[ano == ano_atual]
-    p <- add_trace(
-      p, data = dd, x = ~mes, y = ~quantidade, type = "scatter", mode = "lines",
-      name = as.character(ano_atual),
-      line = list(color = cores[[as.character(ano_atual)]], width = 2.6),
-      hovertemplate = paste0(ano_atual, " — Mês: %{x}<br>Quantidade: %{y:,.0f}<extra></extra>")
-    )
+    dd[, y_plot := get(coluna_y)]
+    dd[, rotulo_dado := format(round(y_plot), big.mark = ".", scientific = FALSE)]
+
+    cor_ano <- cores[[as.character(ano_atual)]]
+
+    # A linha do ano corrente (2025) leva rótulo de dado fixo em cada ponto;
+    # os demais anos ficam só com a linha (leitura via hover), mantendo o
+    # gráfico limpo.
+    if (ano_atual == 2025) {
+      p <- add_trace(
+        p, data = dd, x = ~mes, y = ~y_plot, type = "scatter", mode = "lines+markers+text",
+        name = as.character(ano_atual),
+        line = list(color = cor_ano, width = 2.6),
+        marker = list(color = cor_ano, size = 6),
+        text = ~rotulo_dado, textposition = "top center",
+        textfont = list(size = 10, color = cor_ano),
+        hovertemplate = paste0(ano_atual, " — Mês: %{x}<br>", rotulo_eixo, ": ", prefixo_hover, "%{y:,.0f}<extra></extra>")
+      )
+    } else {
+      p <- add_trace(
+        p, data = dd, x = ~mes, y = ~y_plot, type = "scatter", mode = "lines",
+        name = as.character(ano_atual),
+        line = list(color = cor_ano, width = 2.6),
+        hovertemplate = paste0(ano_atual, " — Mês: %{x}<br>", rotulo_eixo, ": ", prefixo_hover, "%{y:,.0f}<extra></extra>")
+      )
+    }
   }
 
   p |>
     layout(
       title = list(text = titulo, x = 0),
       xaxis = list(title = "Mês de competência", tickmode = "array", tickvals = 1:12, ticktext = MES_LABELS),
-      yaxis = list(title = "Quantidade", tickformat = ",.0f", rangemode = "tozero"),
+      yaxis = list(
+        title = rotulo_eixo, tickformat = ",.0f",
+        tickprefix = if (metrica == "financeiro") "R$ " else "",
+        rangemode = "tozero"
+      ),
       hovermode = "x unified",
       legend = list(orientation = "h", y = -0.2),
       margin = list(b = 90),
@@ -633,6 +728,17 @@ info_fonte_dados <- function() {
   )
 }
 
+# Linha compacta de exportação abaixo de cada gráfico: dados brutos em CSV e
+# o mesmo gráfico como objeto nativo/editável do PowerPoint (não uma
+# imagem). O PNG em alta resolução continua no ícone de câmera do Plotly.
+barra_downloads <- function(id) {
+  div(
+    class = "mb-3 mt-1",
+    downloadButton(paste0(id, "_csv"), "Dados (CSV)", class = "btn-sm btn-outline-secondary"),
+    downloadButton(paste0(id, "_pptx"), "PPTX editável", class = "btn-sm btn-outline-secondary")
+  )
+}
+
 ui <- page_navbar(
   title = "Monitoramento de Produção",
   id = "navbar",
@@ -676,6 +782,14 @@ ui <- page_navbar(
           choices = REGIOES, selected = REGIOES
         ),
         selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL"),
+        selectInput(
+          "municipio_cirurgia", "Município",
+          choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
+        ),
+        div(
+          class = "text-muted small mb-2", style = "line-height: 1.3;",
+          "Filtro de Município vale só para \"Comparação Anos\" — o Diagrama de monitoramento e a Tabela continuam por UF/Região."
+        ),
         info_fonte_dados()
       ),
       tabsetPanel(
@@ -684,12 +798,22 @@ ui <- page_navbar(
         tabPanel(
           "Comparação Anos",
           br(),
-          plotlyOutput("grafico_comparacao_anos", height = "72vh")
+          radioButtons(
+            "metrica_cirurgia_anos", NULL,
+            choices = c("Físico" = "fisico", "Financeiro (R$)" = "financeiro"),
+            selected = "fisico", inline = TRUE
+          ),
+          plotlyOutput("grafico_comparacao_anos", height = "56vh"),
+          barra_downloads("grafico_comparacao_anos"),
+          br(),
+          h5("Dados do gráfico"),
+          DTOutput("tabela_comparacao_anos")
         ),
         tabPanel(
           "Diagrama de monitoramento",
           br(),
-          plotlyOutput("grafico_cirurgia", height = "72vh")
+          plotlyOutput("grafico_cirurgia", height = "68vh"),
+          barra_downloads("grafico_cirurgia")
         ),
         tabPanel(
           "Tabela",
@@ -711,6 +835,14 @@ ui <- page_navbar(
           choices = REGIOES, selected = REGIOES
         ),
         selectInput("uf_oci", "UF", choices = "BRASIL", selected = "BRASIL"),
+        selectInput(
+          "municipio_oci", "Município",
+          choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
+        ),
+        div(
+          class = "text-muted small mb-2", style = "line-height: 1.3;",
+          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\" — a Tabela de status continua por UF/Região."
+        ),
         checkboxGroupInput(
           "especialidades_oci", "Especialidades",
           choices = ORDEM_ESPECIALIDADES, selected = ORDEM_ESPECIALIDADES
@@ -724,22 +856,26 @@ ui <- page_navbar(
           "Série histórica OCI",
           br(),
           h5("OCI geral"),
-          plotlyOutput("grafico_oci", height = "48vh"),
+          plotlyOutput("grafico_oci", height = "40vh"),
+          barra_downloads("grafico_oci"),
           br(),
           h5("Por especialidade"),
-          plotlyOutput("grafico_oci_especialidade", height = "52vh")
+          plotlyOutput("grafico_oci_especialidade", height = "44vh"),
+          barra_downloads("grafico_oci_especialidade")
         ),
         tabPanel(
           "Comparativos",
           br(),
           h5("Físico por especialidade"),
-          plotlyOutput("grafico_oci_fisico_especialidade", height = "48vh"),
+          plotlyOutput("grafico_oci_fisico_especialidade", height = "40vh"),
+          barra_downloads("grafico_oci_fisico_especialidade"),
           br(),
           h5("Financeiro por especialidade (R$)"),
           DTOutput("tabela_oci_financeiro"),
           br(),
           h5("Produção mensal — 2025 vs 2026"),
-          plotlyOutput("grafico_oci_mensal_anos", height = "45vh")
+          plotlyOutput("grafico_oci_mensal_anos", height = "38vh"),
+          barra_downloads("grafico_oci_mensal_anos")
         ),
         tabPanel(
           "Tabela",
@@ -790,7 +926,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "uf_cirurgia", choices = escolhas, selected = selecionado)
   })
 
-  output$grafico_cirurgia <- renderPlotly({
+  dados_diagrama_cirurgia <- reactive({
 
     serie <- serie_cirurgia_indicador()
     validate(need(!is.null(serie), "Série de cirurgias não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
@@ -805,6 +941,12 @@ server <- function(input, output, session) {
       serie[uf_atendimento == input$uf_cirurgia]
     }
     validate(need(nrow(dados_uf) > 0, "Sem dados para a UF selecionada."))
+    dados_uf
+  })
+
+  output$grafico_cirurgia <- renderPlotly({
+
+    dados_uf <- dados_diagrama_cirurgia()
 
     ano_comparacao   <- min(dados_uf$ano)
     ano_monitoramento <- max(dados_uf$ano)
@@ -823,33 +965,115 @@ server <- function(input, output, session) {
     if (input$indicador_cirurgia == "rol") dados()$cirurgia_anos_rol else dados()$cirurgia_anos_total
   })
 
-  output$grafico_comparacao_anos <- renderPlotly({
+  serie_municipio_cirurgia_indicador <- reactive({
+    req(input$indicador_cirurgia)
+    if (input$indicador_cirurgia == "rol") dados()$cirurgia_municipio_rol else dados()$cirurgia_municipio_total
+  })
+
+  # Cascata UF -> Município: só populado quando uma UF específica está
+  # selecionada (em "BRASIL" ficaria com 5000+ opções, sem sentido).
+  observeEvent(list(input$uf_cirurgia, serie_municipio_cirurgia_indicador()), {
+
+    serie_mun <- serie_municipio_cirurgia_indicador()
+
+    if (is.null(input$uf_cirurgia) || input$uf_cirurgia == "BRASIL" || is.null(serie_mun)) {
+      updateSelectInput(session, "municipio_cirurgia", choices = c("Selecione uma UF" = "Todos"), selected = "Todos")
+      return()
+    }
+
+    municipios <- sort(unique(serie_mun[uf_atendimento == input$uf_cirurgia]$municipio_atendimento))
+    escolhas <- setNames(c("Todos", municipios), c("Todos (UF inteira)", municipios))
+
+    selecionado <- if (isTRUE(input$municipio_cirurgia %in% escolhas)) input$municipio_cirurgia else "Todos"
+
+    updateSelectInput(session, "municipio_cirurgia", choices = escolhas, selected = selecionado)
+  })
+
+  # Dados por trás do gráfico "Comparação Anos" e da tabela abaixo dele —
+  # reactive compartilhada para não duplicar a lógica de filtro.
+  dados_comparacao_anos <- reactive({
 
     serie <- serie_anos_cirurgia_indicador()
     validate(need(!is.null(serie), "Série multianual não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
     req(input$uf_cirurgia)
     validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
 
-    todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
+    municipio_sel <- input$municipio_cirurgia
+    usar_municipio <- isTRUE(input$uf_cirurgia != "BRASIL") && !is.null(municipio_sel) && municipio_sel != "Todos"
 
-    dados_uf <- if (input$uf_cirurgia == "BRASIL") {
-      if (todas_regioes) {
-        serie[uf_atendimento == "BRASIL", .(ano, mes, quantidade)]
-      } else {
-        agregar_anos_regiao(serie, input$regiao_cirurgia)
-      }
+    if (usar_municipio) {
+      serie_mun <- serie_municipio_cirurgia_indicador()
+      validate(need(!is.null(serie_mun), "Série por município não encontrada. Rode novamente os scripts 01 e 02 do projeto Cirurgia."))
+      dados_uf <- serie_mun[
+        uf_atendimento == input$uf_cirurgia & municipio_atendimento == municipio_sel,
+        .(ano, mes, quantidade, valor)
+      ]
     } else {
-      serie[uf_atendimento == input$uf_cirurgia, .(ano, mes, quantidade)]
+      todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
+      dados_uf <- if (input$uf_cirurgia == "BRASIL") {
+        if (todas_regioes) {
+          serie[uf_atendimento == "BRASIL", .(ano, mes, quantidade, valor)]
+        } else {
+          agregar_anos_regiao(serie, input$regiao_cirurgia)
+        }
+      } else {
+        serie[uf_atendimento == input$uf_cirurgia, .(ano, mes, quantidade, valor)]
+      }
     }
-    validate(need(nrow(dados_uf) > 0, "Sem dados para a UF selecionada."))
+
+    validate(need(nrow(dados_uf) > 0, "Sem dados para a seleção atual."))
+    dados_uf
+  })
+
+  rotulo_local_cirurgia <- reactive({
+    if (isTRUE(input$municipio_cirurgia != "Todos")) {
+      paste0(input$municipio_cirurgia, " (", input$uf_cirurgia, ")")
+    } else if (input$uf_cirurgia == "BRASIL") {
+      rotulo_agregado(input$regiao_cirurgia)
+    } else {
+      input$uf_cirurgia
+    }
+  })
+
+  output$grafico_comparacao_anos <- renderPlotly({
+
+    dados_uf <- dados_comparacao_anos()
+    req(input$metrica_cirurgia_anos)
 
     rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
-    rotulo_uf <- if (input$uf_cirurgia == "BRASIL") rotulo_agregado(input$regiao_cirurgia) else input$uf_cirurgia
 
     grafico_comparacao_anos(
       dados_uf,
-      titulo = paste0(rotulo_indicador, " — Comparação entre anos — ", rotulo_uf)
+      titulo = paste0(rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia()),
+      metrica = input$metrica_cirurgia_anos
     )
+  })
+
+  output$tabela_comparacao_anos <- renderDT({
+
+    dados_uf <- dados_comparacao_anos()
+    req(input$metrica_cirurgia_anos)
+    coluna <- if (input$metrica_cirurgia_anos == "financeiro") "valor" else "quantidade"
+
+    tabela <- dcast(dados_uf, mes ~ ano, value.var = coluna, fun.aggregate = sum, fill = 0)
+    tabela[, mes := MES_LABELS[mes]]
+    colunas_ano <- setdiff(names(tabela), "mes")
+
+    dt <- datatable(
+      tabela,
+      colnames = c("Mês", colunas_ano),
+      rownames = FALSE,
+      extensions = "Buttons",
+      options = list(dom = "Bt", pageLength = -1, ordering = FALSE, buttons = c("csv", "excel"))
+    )
+
+    if (input$metrica_cirurgia_anos == "financeiro") {
+      dt <- dt |> formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
+    } else {
+      dt <- dt |> formatRound(colunas_ano, digits = 0, mark = ".", interval = 3)
+    }
+
+    dt
   })
 
   output$tabela_status_cirurgia <- renderDT({
@@ -901,10 +1125,57 @@ server <- function(input, output, session) {
     updateSelectInput(session, "uf_oci", choices = escolhas, selected = selecionado)
   })
 
+  # Cascata UF -> Município (mesma lógica da aba Cirurgias): só populado
+  # quando uma UF específica está selecionada.
+  observeEvent(list(input$uf_oci, dados()$oci_especialidade_municipio), {
+
+    base_mun <- dados()$oci_especialidade_municipio
+
+    if (is.null(input$uf_oci) || input$uf_oci == "BRASIL" || is.null(base_mun)) {
+      updateSelectInput(session, "municipio_oci", choices = c("Selecione uma UF" = "Todos"), selected = "Todos")
+      return()
+    }
+
+    municipios <- sort(unique(base_mun[NM_UF == input$uf_oci]$MUNICIPIO))
+    escolhas <- setNames(c("Todos", municipios), c("Todos (UF inteira)", municipios))
+
+    selecionado <- if (isTRUE(input$municipio_oci %in% escolhas)) input$municipio_oci else "Todos"
+
+    updateSelectInput(session, "municipio_oci", choices = escolhas, selected = selecionado)
+  })
+
+  municipio_oci_ativo <- reactive({
+    isTRUE(input$uf_oci != "BRASIL") && !is.null(input$municipio_oci) && input$municipio_oci != "Todos"
+  })
+
+  rotulo_local_oci <- reactive({
+    if (municipio_oci_ativo()) {
+      paste0(input$municipio_oci, " (", input$uf_oci, ")")
+    } else if (input$uf_oci == "BRASIL") {
+      rotulo_agregado(input$regiao_oci)
+    } else {
+      input$uf_oci
+    }
+  })
+
   # Série geral (mesma agregação usada pelo diagrama de monitoramento),
   # reaproveitada pelo gráfico por especialidade (linha "Geral") e pelo
-  # comparativo mensal 2025 x 2026.
+  # comparativo mensal 2025 x 2026. Quando um município está selecionado,
+  # deriva o "geral" somando as especialidades conhecidas na base de
+  # município (não há export separado de OCI geral por município).
   oci_geral_filtrada <- reactive({
+
+    if (municipio_oci_ativo()) {
+      base_mun <- dados()$oci_especialidade_municipio
+      validate(need(!is.null(base_mun), "Tabela de OCI por especialidade e município não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
+      return(
+        base_mun[
+          NM_UF == input$uf_oci & MUNICIPIO == input$municipio_oci,
+          .(oci = sum(OCI, na.rm = TRUE)),
+          by = competencia
+        ]
+      )
+    }
 
     serie <- dados()$oci_serie
     validate(need(!is.null(serie), "Planilha de OCI por UF/mês não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
@@ -922,11 +1193,17 @@ server <- function(input, output, session) {
     }
   })
 
-  # Base de OCI por especialidade já filtrada por UF/região, antes do
-  # filtro de especialidades marcadas (aplicado individualmente em cada
-  # gráfico, já que "Comparativos" ignora o toggle de especialidade e usa
-  # a série geral para o comparativo mensal).
+  # Base de OCI por especialidade já filtrada por UF/região (ou município),
+  # antes do filtro de especialidades marcadas (aplicado individualmente em
+  # cada gráfico, já que "Comparativos" ignora o toggle de especialidade e
+  # usa a série geral para o comparativo mensal).
   oci_especialidade_filtrada <- reactive({
+
+    if (municipio_oci_ativo()) {
+      base_mun <- dados()$oci_especialidade_municipio
+      validate(need(!is.null(base_mun), "Tabela de OCI por especialidade e município não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
+      return(base_mun[NM_UF == input$uf_oci & MUNICIPIO == input$municipio_oci])
+    }
 
     base <- dados()$oci_especialidade
     validate(need(!is.null(base), "Tabela de OCI por especialidade não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
@@ -945,15 +1222,12 @@ server <- function(input, output, session) {
     dados_grafico <- oci_geral_filtrada()
     validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
 
-    rotulo_uf <- if (input$uf_oci == "BRASIL") rotulo_agregado(input$regiao_oci) else input$uf_oci
+    rotulo_uf <- rotulo_local_oci()
 
     grafico_oci(dados_grafico, titulo = paste0("OCI realizadas — ", rotulo_uf))
   })
 
-  output$grafico_oci_especialidade <- renderPlotly({
-
-    dados_geral <- oci_geral_filtrada()
-    validate(need(nrow(dados_geral) > 0, "Sem dados para a seleção atual."))
+  dados_oci_especialidade_agregada <- reactive({
 
     especialidades_sel <- input$especialidades_oci
     validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
@@ -964,12 +1238,17 @@ server <- function(input, output, session) {
       by = .(ANO, MES, ESPECIALIDADE)
     ]
     agregada[, competencia := as.Date(sprintf("%04d-%02d-01", ANO, MES))]
+    agregada[]
+  })
 
-    rotulo_uf <- if (input$uf_oci == "BRASIL") rotulo_agregado(input$regiao_oci) else input$uf_oci
+  output$grafico_oci_especialidade <- renderPlotly({
+
+    dados_geral <- oci_geral_filtrada()
+    validate(need(nrow(dados_geral) > 0, "Sem dados para a seleção atual."))
 
     grafico_oci_especialidade(
-      dados_geral, agregada,
-      titulo = paste0("OCI por especialidade — ", rotulo_uf)
+      dados_geral, dados_oci_especialidade_agregada(),
+      titulo = paste0("OCI por especialidade — ", rotulo_local_oci())
     )
   })
 
@@ -992,7 +1271,7 @@ server <- function(input, output, session) {
 
   output$grafico_oci_fisico_especialidade <- renderPlotly({
 
-    rotulo_uf <- if (input$uf_oci == "BRASIL") rotulo_agregado(input$regiao_oci) else input$uf_oci
+    rotulo_uf <- rotulo_local_oci()
 
     grafico_oci_fisico_especialidade(
       oci_especialidade_por_ano(),
@@ -1019,24 +1298,25 @@ server <- function(input, output, session) {
       formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
   })
 
-  output$grafico_oci_mensal_anos <- renderPlotly({
+  dados_oci_mensal_anos <- reactive({
 
     dados_grafico <- oci_geral_filtrada()
     validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
 
-    agregada <- dados_grafico[
+    dados_grafico[
       , .(oci = sum(oci, na.rm = TRUE)),
       by = .(
         ano = as.integer(format(competencia, "%Y")),
         mes = as.integer(format(competencia, "%m"))
       )
     ]
+  })
 
-    rotulo_uf <- if (input$uf_oci == "BRASIL") rotulo_agregado(input$regiao_oci) else input$uf_oci
+  output$grafico_oci_mensal_anos <- renderPlotly({
 
     grafico_oci_mensal_anos(
-      agregada,
-      titulo = paste0("Produção mensal — 2025 vs 2026 — ", rotulo_uf)
+      dados_oci_mensal_anos(),
+      titulo = paste0("Produção mensal — 2025 vs 2026 — ", rotulo_local_oci())
     )
   })
 
@@ -1056,6 +1336,134 @@ server <- function(input, output, session) {
       formatRound(c("ultimo", "anterior"), digits = 0, mark = ".", interval = 3) |>
       formatPercentage("variacao_ultimo_mes", 1)
   })
+
+  ## ---- Exportações (CSV e PPTX editável) dos 6 gráficos ----
+  # Cada gráfico expõe os mesmos dados usados para plotar (nenhum recálculo)
+  # em CSV, e uma reconstrução do gráfico como objeto nativo do PowerPoint.
+
+  construir_pptx_diagrama_cirurgia <- function() {
+
+    dados_uf <- dados_diagrama_cirurgia()
+    ano_comparacao <- min(dados_uf$ano)
+    ano_monitoramento <- max(dados_uf$ano)
+
+    faixa <- unique(dados_uf[, .(
+      mes,
+      `Mín` = limite_inferior, `Máx` = limite_superior,
+      Q1 = q1_historico, Q3 = q3_historico, Mediana = mediana_historica
+    )])
+    faixa_longa <- melt(faixa, id.vars = "mes", variable.name = "serie", value.name = "valor")
+    faixa_longa[, serie := as.character(serie)]
+
+    comp <- dados_uf[ano == ano_comparacao, .(mes, valor = quantidade, serie = paste0("Produção ", ano_comparacao))]
+    moni <- dados_uf[ano == ano_monitoramento, .(mes, valor = quantidade, serie = paste0("Produção ", ano_monitoramento))]
+
+    longa <- rbind(faixa_longa, comp, moni)
+    setorder(longa, serie, mes)
+
+    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
+    rotulo_uf <- if (input$uf_cirurgia == "BRASIL") rotulo_agregado(input$regiao_cirurgia) else input$uf_cirurgia
+
+    ms_linechart(as.data.frame(longa), x = "mes", y = "valor", group = "serie") |>
+      chart_labels(title = paste0(rotulo_indicador, " — ", rotulo_uf), xlab = "Mês", ylab = "Quantidade")
+  }
+
+  output$grafico_cirurgia_csv  <- handler_csv(dados_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
+  output$grafico_cirurgia_pptx <- handler_pptx(construir_pptx_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
+
+  construir_pptx_comparacao_anos <- function() {
+
+    dados_uf <- dados_comparacao_anos()
+    coluna <- if (input$metrica_cirurgia_anos == "financeiro") "valor" else "quantidade"
+    df <- dados_uf[, .(mes, ano = as.character(ano), y = get(coluna))]
+
+    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
+    rotulo_eixo <- if (input$metrica_cirurgia_anos == "financeiro") "Valor (R$)" else "Quantidade"
+
+    ms_linechart(as.data.frame(df), x = "mes", y = "y", group = "ano") |>
+      chart_labels(
+        title = paste0(rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia()),
+        xlab = "Mês", ylab = rotulo_eixo
+      )
+  }
+
+  output$grafico_comparacao_anos_csv  <- handler_csv(dados_comparacao_anos, "comparacao_anos_cirurgias")
+  output$grafico_comparacao_anos_pptx <- handler_pptx(construir_pptx_comparacao_anos, "comparacao_anos_cirurgias")
+
+  construir_pptx_oci_geral <- function() {
+
+    df <- oci_geral_filtrada()[, .(competencia = format(competencia, "%Y-%m"), oci, serie = "OCI")]
+
+    ms_linechart(as.data.frame(df), x = "competencia", y = "oci", group = "serie") |>
+      chart_labels(title = paste0("OCI realizadas — ", rotulo_local_oci()), xlab = "Mês", ylab = "OCI realizadas")
+  }
+
+  output$grafico_oci_csv  <- handler_csv(oci_geral_filtrada, "oci_geral")
+  output$grafico_oci_pptx <- handler_pptx(construir_pptx_oci_geral, "oci_geral")
+
+  dados_oci_especialidade_export <- reactive({
+    dg <- oci_geral_filtrada()[, .(competencia, valor = oci, serie = "Geral")]
+    ag <- dados_oci_especialidade_agregada()[, .(competencia, valor = OCI, serie = as.character(ESPECIALIDADE))]
+    rbind(dg, ag)
+  })
+
+  construir_pptx_oci_especialidade <- function() {
+
+    df <- dados_oci_especialidade_export()
+    df[, competencia := format(competencia, "%Y-%m")]
+
+    ms_linechart(as.data.frame(df), x = "competencia", y = "valor", group = "serie") |>
+      chart_labels(title = paste0("OCI por especialidade — ", rotulo_local_oci()), xlab = "Mês", ylab = "OCI realizadas")
+  }
+
+  output$grafico_oci_especialidade_csv  <- handler_csv(dados_oci_especialidade_export, "oci_por_especialidade")
+  output$grafico_oci_especialidade_pptx <- handler_pptx(construir_pptx_oci_especialidade, "oci_por_especialidade")
+
+  construir_pptx_oci_fisico_especialidade <- function() {
+
+    df <- oci_especialidade_por_ano()[, .(ESPECIALIDADE = as.character(ESPECIALIDADE), ano = as.character(ANO), OCI)]
+
+    ms_barchart(as.data.frame(df), x = "ESPECIALIDADE", y = "OCI", group = "ano") |>
+      chart_labels(
+        title = paste0("Físico por especialidade — ", rotulo_local_oci()),
+        xlab = "Especialidade", ylab = "OCI realizadas (físico)"
+      )
+  }
+
+  output$grafico_oci_fisico_especialidade_csv  <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
+  output$grafico_oci_fisico_especialidade_pptx <- handler_pptx(construir_pptx_oci_fisico_especialidade, "oci_fisico_especialidade")
+
+  construir_pptx_oci_mensal_anos <- function() {
+
+    df <- dados_oci_mensal_anos()[, .(mes = MES_LABELS[mes], ano = as.character(ano), oci)]
+
+    ms_barchart(as.data.frame(df), x = "mes", y = "oci", group = "ano") |>
+      chart_labels(
+        title = paste0("Produção mensal — 2025 vs 2026 — ", rotulo_local_oci()),
+        xlab = "Mês", ylab = "OCI realizadas"
+      )
+  }
+
+  output$grafico_oci_mensal_anos_csv  <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
+  output$grafico_oci_mensal_anos_pptx <- handler_pptx(construir_pptx_oci_mensal_anos, "oci_mensal_2025_2026")
+
+  # Os botões de download ficam dentro de sub-abas que já nascem "ativas"
+  # (a primeira de cada tabsetPanel). Como elas nunca disparam um evento de
+  # troca de aba do Bootstrap, o Shiny não desconsidera a suspensão padrão
+  # de outputs escondidos e o link de download nunca é calculado. Aqui isso
+  # é desligado especificamente para esses 12 outputs (não afeta os
+  # gráficos/tabelas, que continuam suspensos até a aba ser visitada).
+  botoes_download <- c(
+    "grafico_cirurgia_csv", "grafico_cirurgia_pptx",
+    "grafico_comparacao_anos_csv", "grafico_comparacao_anos_pptx",
+    "grafico_oci_csv", "grafico_oci_pptx",
+    "grafico_oci_especialidade_csv", "grafico_oci_especialidade_pptx",
+    "grafico_oci_fisico_especialidade_csv", "grafico_oci_fisico_especialidade_pptx",
+    "grafico_oci_mensal_anos_csv", "grafico_oci_mensal_anos_pptx"
+  )
+  for (id_botao in botoes_download) {
+    outputOptions(output, id_botao, suspendWhenHidden = FALSE)
+  }
 }
 
 shinyApp(ui, server)
