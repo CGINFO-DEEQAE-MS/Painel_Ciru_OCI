@@ -5,8 +5,6 @@ library(DT)
 library(data.table)
 library(readxl)
 library(stringi)
-library(officer)
-library(mschart)
 
 #### CAMINHOS ####
 
@@ -400,20 +398,6 @@ handler_csv <- function(dados_fn, nome_arquivo) {
   )
 }
 
-# Mesmo gráfico como objeto nativo do PowerPoint (officer + mschart), editável
-# depois de aberto — diferente do PNG do Plotly, que é uma imagem estática.
-handler_pptx <- function(construir_fn, nome_arquivo) {
-  downloadHandler(
-    filename = function() paste0(nome_arquivo, "_", format(Sys.Date(), "%Y%m%d"), ".pptx"),
-    content = function(file) {
-      doc <- read_pptx()
-      doc <- add_slide(doc, layout = "Title and Content", master = "Office Theme")
-      doc <- ph_with(doc, value = construir_fn(), location = ph_location_fullsize())
-      print(doc, target = file)
-    }
-  )
-}
-
 grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo) {
 
   d <- dados_uf[order(ano, mes)]
@@ -506,10 +490,10 @@ grafico_comparacao_anos <- function(dados, titulo, metrica = "fisico") {
 
     cor_ano <- cores[[as.character(ano_atual)]]
 
-    # A linha do ano corrente (2025) leva rótulo de dado fixo em cada ponto;
-    # os demais anos ficam só com a linha (leitura via hover), mantendo o
+    # As linhas de 2025 e 2026 levam rótulo de dado fixo em cada ponto; os
+    # demais anos ficam só com a linha (leitura via hover), mantendo o
     # gráfico limpo.
-    if (ano_atual == 2025) {
+    if (ano_atual %in% c(2025, 2026)) {
       p <- add_trace(
         p, data = dd, x = ~mes, y = ~y_plot, type = "scatter", mode = "lines+markers+text",
         name = as.character(ano_atual),
@@ -734,8 +718,7 @@ info_fonte_dados <- function() {
 barra_downloads <- function(id) {
   div(
     class = "mb-3 mt-1",
-    downloadButton(paste0(id, "_csv"), "Dados (CSV)", class = "btn-sm btn-outline-secondary"),
-    downloadButton(paste0(id, "_pptx"), "PPTX editável", class = "btn-sm btn-outline-secondary")
+    downloadButton(paste0(id, "_csv"), "Dados (CSV)", class = "btn-sm btn-outline-secondary")
   )
 }
 
@@ -803,11 +786,8 @@ ui <- page_navbar(
             choices = c("Físico" = "fisico", "Financeiro (R$)" = "financeiro"),
             selected = "fisico", inline = TRUE
           ),
-          plotlyOutput("grafico_comparacao_anos", height = "56vh"),
-          barra_downloads("grafico_comparacao_anos"),
-          br(),
-          h5("Dados do gráfico"),
-          DTOutput("tabela_comparacao_anos")
+          plotlyOutput("grafico_comparacao_anos", height = "68vh"),
+          barra_downloads("grafico_comparacao_anos")
         ),
         tabPanel(
           "Diagrama de monitoramento",
@@ -1049,32 +1029,6 @@ server <- function(input, output, session) {
     )
   })
 
-  output$tabela_comparacao_anos <- renderDT({
-
-    dados_uf <- dados_comparacao_anos()
-    req(input$metrica_cirurgia_anos)
-    coluna <- if (input$metrica_cirurgia_anos == "financeiro") "valor" else "quantidade"
-
-    tabela <- dcast(dados_uf, mes ~ ano, value.var = coluna, fun.aggregate = sum, fill = 0)
-    tabela[, mes := MES_LABELS[mes]]
-    colunas_ano <- setdiff(names(tabela), "mes")
-
-    dt <- datatable(
-      tabela,
-      colnames = c("Mês", colunas_ano),
-      rownames = FALSE,
-      extensions = "Buttons",
-      options = list(dom = "Bt", pageLength = -1, ordering = FALSE, buttons = c("csv", "excel"))
-    )
-
-    if (input$metrica_cirurgia_anos == "financeiro") {
-      dt <- dt |> formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
-    } else {
-      dt <- dt |> formatRound(colunas_ano, digits = 0, mark = ".", interval = 3)
-    }
-
-    dt
-  })
 
   output$tabela_status_cirurgia <- renderDT({
 
@@ -1337,129 +1291,36 @@ server <- function(input, output, session) {
       formatPercentage("variacao_ultimo_mes", 1)
   })
 
-  ## ---- Exportações (CSV e PPTX editável) dos 6 gráficos ----
-  # Cada gráfico expõe os mesmos dados usados para plotar (nenhum recálculo)
-  # em CSV, e uma reconstrução do gráfico como objeto nativo do PowerPoint.
+  ## ---- Exportação de dados (CSV) dos 6 gráficos ----
+  # Cada gráfico expõe os mesmos dados usados para plotar (nenhum recálculo).
 
-  construir_pptx_diagrama_cirurgia <- function() {
-
-    dados_uf <- dados_diagrama_cirurgia()
-    ano_comparacao <- min(dados_uf$ano)
-    ano_monitoramento <- max(dados_uf$ano)
-
-    faixa <- unique(dados_uf[, .(
-      mes,
-      `Mín` = limite_inferior, `Máx` = limite_superior,
-      Q1 = q1_historico, Q3 = q3_historico, Mediana = mediana_historica
-    )])
-    faixa_longa <- melt(faixa, id.vars = "mes", variable.name = "serie", value.name = "valor")
-    faixa_longa[, serie := as.character(serie)]
-
-    comp <- dados_uf[ano == ano_comparacao, .(mes, valor = quantidade, serie = paste0("Produção ", ano_comparacao))]
-    moni <- dados_uf[ano == ano_monitoramento, .(mes, valor = quantidade, serie = paste0("Produção ", ano_monitoramento))]
-
-    longa <- rbind(faixa_longa, comp, moni)
-    setorder(longa, serie, mes)
-
-    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
-    rotulo_uf <- if (input$uf_cirurgia == "BRASIL") rotulo_agregado(input$regiao_cirurgia) else input$uf_cirurgia
-
-    ms_linechart(as.data.frame(longa), x = "mes", y = "valor", group = "serie") |>
-      chart_labels(title = paste0(rotulo_indicador, " — ", rotulo_uf), xlab = "Mês", ylab = "Quantidade")
-  }
-
-  output$grafico_cirurgia_csv  <- handler_csv(dados_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
-  output$grafico_cirurgia_pptx <- handler_pptx(construir_pptx_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
-
-  construir_pptx_comparacao_anos <- function() {
-
-    dados_uf <- dados_comparacao_anos()
-    coluna <- if (input$metrica_cirurgia_anos == "financeiro") "valor" else "quantidade"
-    df <- dados_uf[, .(mes, ano = as.character(ano), y = get(coluna))]
-
-    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
-    rotulo_eixo <- if (input$metrica_cirurgia_anos == "financeiro") "Valor (R$)" else "Quantidade"
-
-    ms_linechart(as.data.frame(df), x = "mes", y = "y", group = "ano") |>
-      chart_labels(
-        title = paste0(rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia()),
-        xlab = "Mês", ylab = rotulo_eixo
-      )
-  }
-
-  output$grafico_comparacao_anos_csv  <- handler_csv(dados_comparacao_anos, "comparacao_anos_cirurgias")
-  output$grafico_comparacao_anos_pptx <- handler_pptx(construir_pptx_comparacao_anos, "comparacao_anos_cirurgias")
-
-  construir_pptx_oci_geral <- function() {
-
-    df <- oci_geral_filtrada()[, .(competencia = format(competencia, "%Y-%m"), oci, serie = "OCI")]
-
-    ms_linechart(as.data.frame(df), x = "competencia", y = "oci", group = "serie") |>
-      chart_labels(title = paste0("OCI realizadas — ", rotulo_local_oci()), xlab = "Mês", ylab = "OCI realizadas")
-  }
-
-  output$grafico_oci_csv  <- handler_csv(oci_geral_filtrada, "oci_geral")
-  output$grafico_oci_pptx <- handler_pptx(construir_pptx_oci_geral, "oci_geral")
+  output$grafico_cirurgia_csv <- handler_csv(dados_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
+  output$grafico_comparacao_anos_csv <- handler_csv(dados_comparacao_anos, "comparacao_anos_cirurgias")
+  output$grafico_oci_csv <- handler_csv(oci_geral_filtrada, "oci_geral")
 
   dados_oci_especialidade_export <- reactive({
     dg <- oci_geral_filtrada()[, .(competencia, valor = oci, serie = "Geral")]
     ag <- dados_oci_especialidade_agregada()[, .(competencia, valor = OCI, serie = as.character(ESPECIALIDADE))]
     rbind(dg, ag)
   })
+  output$grafico_oci_especialidade_csv <- handler_csv(dados_oci_especialidade_export, "oci_por_especialidade")
 
-  construir_pptx_oci_especialidade <- function() {
-
-    df <- dados_oci_especialidade_export()
-    df[, competencia := format(competencia, "%Y-%m")]
-
-    ms_linechart(as.data.frame(df), x = "competencia", y = "valor", group = "serie") |>
-      chart_labels(title = paste0("OCI por especialidade — ", rotulo_local_oci()), xlab = "Mês", ylab = "OCI realizadas")
-  }
-
-  output$grafico_oci_especialidade_csv  <- handler_csv(dados_oci_especialidade_export, "oci_por_especialidade")
-  output$grafico_oci_especialidade_pptx <- handler_pptx(construir_pptx_oci_especialidade, "oci_por_especialidade")
-
-  construir_pptx_oci_fisico_especialidade <- function() {
-
-    df <- oci_especialidade_por_ano()[, .(ESPECIALIDADE = as.character(ESPECIALIDADE), ano = as.character(ANO), OCI)]
-
-    ms_barchart(as.data.frame(df), x = "ESPECIALIDADE", y = "OCI", group = "ano") |>
-      chart_labels(
-        title = paste0("Físico por especialidade — ", rotulo_local_oci()),
-        xlab = "Especialidade", ylab = "OCI realizadas (físico)"
-      )
-  }
-
-  output$grafico_oci_fisico_especialidade_csv  <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
-  output$grafico_oci_fisico_especialidade_pptx <- handler_pptx(construir_pptx_oci_fisico_especialidade, "oci_fisico_especialidade")
-
-  construir_pptx_oci_mensal_anos <- function() {
-
-    df <- dados_oci_mensal_anos()[, .(mes = MES_LABELS[mes], ano = as.character(ano), oci)]
-
-    ms_barchart(as.data.frame(df), x = "mes", y = "oci", group = "ano") |>
-      chart_labels(
-        title = paste0("Produção mensal — 2025 vs 2026 — ", rotulo_local_oci()),
-        xlab = "Mês", ylab = "OCI realizadas"
-      )
-  }
-
-  output$grafico_oci_mensal_anos_csv  <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
-  output$grafico_oci_mensal_anos_pptx <- handler_pptx(construir_pptx_oci_mensal_anos, "oci_mensal_2025_2026")
+  output$grafico_oci_fisico_especialidade_csv <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
+  output$grafico_oci_mensal_anos_csv <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
 
   # Os botões de download ficam dentro de sub-abas que já nascem "ativas"
   # (a primeira de cada tabsetPanel). Como elas nunca disparam um evento de
   # troca de aba do Bootstrap, o Shiny não desconsidera a suspensão padrão
   # de outputs escondidos e o link de download nunca é calculado. Aqui isso
-  # é desligado especificamente para esses 12 outputs (não afeta os
+  # é desligado especificamente para esses 6 outputs (não afeta os
   # gráficos/tabelas, que continuam suspensos até a aba ser visitada).
   botoes_download <- c(
-    "grafico_cirurgia_csv", "grafico_cirurgia_pptx",
-    "grafico_comparacao_anos_csv", "grafico_comparacao_anos_pptx",
-    "grafico_oci_csv", "grafico_oci_pptx",
-    "grafico_oci_especialidade_csv", "grafico_oci_especialidade_pptx",
-    "grafico_oci_fisico_especialidade_csv", "grafico_oci_fisico_especialidade_pptx",
-    "grafico_oci_mensal_anos_csv", "grafico_oci_mensal_anos_pptx"
+    "grafico_cirurgia_csv",
+    "grafico_comparacao_anos_csv",
+    "grafico_oci_csv",
+    "grafico_oci_especialidade_csv",
+    "grafico_oci_fisico_especialidade_csv",
+    "grafico_oci_mensal_anos_csv"
   )
   for (id_botao in botoes_download) {
     outputOptions(output, id_botao, suspendWhenHidden = FALSE)
