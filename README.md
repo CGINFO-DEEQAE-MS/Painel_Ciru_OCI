@@ -56,15 +56,6 @@ OCI/resultados/tabela_status_OCI_planilhao_*.csv
 
 ## Executar localmente
 
-Na primeira vez, instale as dependências (inclui `officer`/`mschart`, usados na exportação de gráficos em PowerPoint editável):
-
-```r
-install.packages(c(
-  "shiny", "bslib", "plotly", "DT", "data.table",
-  "readxl", "stringi", "officer", "mschart"
-))
-```
-
 Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
 
 ```r
