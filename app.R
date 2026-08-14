@@ -42,6 +42,14 @@ CORES_CLASSIFICACAO <- c(
 
 DATA_VIRADA_OCI <- as.Date("2026-01-01")
 
+# Rótulos por indicador de Cirurgias, usados no título dos gráficos e na
+# tabela — mesmo texto do radioButtons "Indicador" no sidebar.
+ROTULOS_INDICADOR_CIRURGIA <- c(
+  rol   = "Cirurgias Eletivas (MAC e FAEC) do ROL",
+  total = "Cirurgias Eletivas (MAC e FAEC) totais",
+  pnrf  = "Cirurgias Eletivas do Programa (PNRF)"
+)
+
 ORDEM_ESPECIALIDADES <- c(
   "Cardiologia", "Oftalmologia", "Oncologia",
   "Ortopedia", "Otorrinolaringologia", "Saúde Mulher"
@@ -271,10 +279,16 @@ sincronizar_dados_locais <- function() {
   arquivos <- c(
     localizar_arquivo(origem_cirurgia, "^serie_completa_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_completa_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_completa_pnrf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_completa_financeiro_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_completa_financeiro_rol_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_completa_financeiro_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_uf\\.csv$"),
@@ -292,10 +306,16 @@ carregar_tudo <- function() {
   list(
     cirurgia_rol = carregar_serie_cirurgia("rol"),
     cirurgia_total = carregar_serie_cirurgia("total"),
+    cirurgia_pnrf = carregar_serie_cirurgia("pnrf"),
+    cirurgia_financeiro_rol = carregar_serie_cirurgia("financeiro_rol"),
+    cirurgia_financeiro_total = carregar_serie_cirurgia("financeiro_total"),
+    cirurgia_financeiro_pnrf = carregar_serie_cirurgia("financeiro_pnrf"),
     cirurgia_anos_rol = carregar_serie_anos_cirurgia("rol"),
     cirurgia_anos_total = carregar_serie_anos_cirurgia("total"),
+    cirurgia_anos_pnrf = carregar_serie_anos_cirurgia("pnrf"),
     cirurgia_municipio_rol = carregar_serie_municipio_cirurgia("rol"),
     cirurgia_municipio_total = carregar_serie_municipio_cirurgia("total"),
+    cirurgia_municipio_pnrf = carregar_serie_municipio_cirurgia("pnrf"),
     oci_serie = carregar_serie_oci(),
     oci_status = carregar_status_oci(),
     oci_especialidade = carregar_oci_especialidade(),
@@ -398,7 +418,7 @@ handler_csv <- function(dados_fn, nome_arquivo) {
   )
 }
 
-grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo) {
+grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo, metrica = "fisico") {
 
   d <- dados_uf[order(ano, mes)]
 
@@ -410,16 +430,14 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
   comp <- d[ano == ano_comparacao]
   moni <- d[ano == ano_monitoramento]
 
-  cores_pontos <- unname(CORES_CLASSIFICACAO[moni$classificacao])
+  # A classificação (Esperado/Acima do esperado/...) foi desenhada para
+  # produção física; para valores financeiros (R$) ela não se aplica, então
+  # o modo financeiro mostra só a linha de produção, sem cor por ponto nem
+  # legenda de classificação.
+  com_classificacao <- metrica != "financeiro"
 
-  # Como os pontos de "Produção <ano>" são um único trace com cor variável
-  # por classificação, o Plotly não gera legenda para cada cor sozinho.
-  # Os traces abaixo existem só para aparecer na legenda (sem desenhar nada
-  # no gráfico), facilitando a leitura rápida das cores de classificação.
-  niveis_classificacao <- c(
-    "Esperado", "Acima do esperado", "Acima do limite esperado",
-    "Atenção", "Crítico abaixo do limite esperado"
-  )
+  rotulo_eixo <- if (metrica == "financeiro") "Valor (R$)" else "Quantidade"
+  prefixo_hover <- if (metrica == "financeiro") "R$ " else ""
 
   p <- plot_ly() |>
     add_ribbons(
@@ -439,22 +457,49 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
     add_lines(
       data = comp, x = ~mes, y = ~quantidade, name = paste0("Produção ", ano_comparacao),
       line = list(color = "#003366", width = 2.4),
-      hovertemplate = "Mês: %{x}<br>Quantidade: %{y:,.0f}<extra></extra>"
-    ) |>
-    add_trace(
+      hovertemplate = paste0("Mês: %{x}<br>", rotulo_eixo, ": ", prefixo_hover, "%{y:,.0f}<extra></extra>")
+    )
+
+  if (com_classificacao) {
+
+    cores_pontos <- unname(CORES_CLASSIFICACAO[moni$classificacao])
+
+    p <- add_trace(
+      p,
       data = moni, x = ~mes, y = ~quantidade, name = paste0("Produção ", ano_monitoramento),
       type = "scatter", mode = "lines+markers",
       line = list(color = "black", width = 2.4),
       marker = list(size = 9, color = cores_pontos, line = list(color = "black", width = 0.5)),
       text = ~classificacao,
-      hovertemplate = "Mês: %{x}<br>Quantidade: %{y:,.0f}<br>%{text}<extra></extra>"
+      hovertemplate = paste0("Mês: %{x}<br>", rotulo_eixo, ": ", prefixo_hover, "%{y:,.0f}<br>%{text}<extra></extra>")
     )
 
-  for (nivel in niveis_classificacao) {
+    # Como os pontos de "Produção <ano>" são um único trace com cor variável
+    # por classificação, o Plotly não gera legenda para cada cor sozinho.
+    # Os traces abaixo existem só para aparecer na legenda (sem desenhar nada
+    # no gráfico), facilitando a leitura rápida das cores de classificação.
+    niveis_classificacao <- c(
+      "Esperado", "Acima do esperado", "Acima do limite esperado",
+      "Atenção", "Crítico abaixo do limite esperado"
+    )
+
+    for (nivel in niveis_classificacao) {
+      p <- add_trace(
+        p, x = list(NA), y = list(NA), type = "scatter", mode = "markers",
+        marker = list(size = 9, color = CORES_CLASSIFICACAO[[nivel]]),
+        name = nivel, showlegend = TRUE, hoverinfo = "skip"
+      )
+    }
+
+  } else {
+
     p <- add_trace(
-      p, x = list(NA), y = list(NA), type = "scatter", mode = "markers",
-      marker = list(size = 9, color = CORES_CLASSIFICACAO[[nivel]]),
-      name = nivel, showlegend = TRUE, hoverinfo = "skip"
+      p,
+      data = moni, x = ~mes, y = ~quantidade, name = paste0("Produção ", ano_monitoramento),
+      type = "scatter", mode = "lines+markers",
+      line = list(color = "black", width = 2.4),
+      marker = list(size = 9, color = "black", line = list(color = "black", width = 0.5)),
+      hovertemplate = paste0("Mês: %{x}<br>", rotulo_eixo, ": ", prefixo_hover, "%{y:,.0f}<extra></extra>")
     )
   }
 
@@ -462,7 +507,11 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
     layout(
       title = list(text = titulo, x = 0),
       xaxis = list(title = "Mês de competência", tickmode = "array", tickvals = 1:12, ticktext = MES_LABELS),
-      yaxis = list(title = "Quantidade", tickformat = ",.0f", rangemode = "tozero"),
+      yaxis = list(
+        title = rotulo_eixo, tickformat = ",.0f",
+        tickprefix = if (metrica == "financeiro") "R$ " else "",
+        rangemode = "tozero"
+      ),
       hovermode = "x unified",
       legend = list(orientation = "h", y = -0.2),
       margin = list(b = 90),
@@ -757,7 +806,11 @@ ui <- page_navbar(
         open = "always",
         radioButtons(
           "indicador_cirurgia", "Indicador",
-          choices = c("ROL" = "rol", "Total" = "total"),
+          choices = c(
+            "Cirurgias Eletivas (MAC e FAEC) do ROL" = "rol",
+            "Cirurgias Eletivas (MAC e FAEC) totais" = "total",
+            "Cirurgias Eletivas do Programa (PNRF)" = "pnrf"
+          ),
           selected = "rol"
         ),
         checkboxGroupInput(
@@ -792,7 +845,12 @@ ui <- page_navbar(
         tabPanel(
           "Diagrama de monitoramento",
           br(),
-          plotlyOutput("grafico_cirurgia", height = "68vh"),
+          radioButtons(
+            "metrica_cirurgia_diagrama", NULL,
+            choices = c("Físico" = "fisico", "Financeiro (R$)" = "financeiro"),
+            selected = "fisico", inline = TRUE
+          ),
+          plotlyOutput("grafico_cirurgia", height = "62vh"),
           barra_downloads("grafico_cirurgia")
         ),
         tabPanel(
@@ -888,12 +946,23 @@ server <- function(input, output, session) {
 
   ## ---- Cirurgias ----
 
-  serie_cirurgia_indicador <- reactive({
+  # Física, independente do toggle Físico/Financeiro do Diagrama — usada pela
+  # cascata de UF e pela Tabela de status (que não segue esse toggle).
+  serie_cirurgia_indicador_fisica <- reactive({
     req(input$indicador_cirurgia)
-    if (input$indicador_cirurgia == "rol") dados()$cirurgia_rol else dados()$cirurgia_total
+    dados()[[paste0("cirurgia_", input$indicador_cirurgia)]]
   })
 
-  observeEvent(list(input$regiao_cirurgia, serie_cirurgia_indicador()), {
+  # Física ou financeira conforme o toggle do Diagrama de monitoramento —
+  # só usada por dados_diagrama_cirurgia()/output$grafico_cirurgia.
+  serie_cirurgia_indicador <- reactive({
+    req(input$indicador_cirurgia)
+    req(input$metrica_cirurgia_diagrama)
+    prefixo <- if (input$metrica_cirurgia_diagrama == "financeiro") "cirurgia_financeiro_" else "cirurgia_"
+    dados()[[paste0(prefixo, input$indicador_cirurgia)]]
+  })
+
+  observeEvent(list(input$regiao_cirurgia, serie_cirurgia_indicador_fisica()), {
 
     ufs_regiao <- sort(UF_REF[REGIAO %in% input$regiao_cirurgia]$NM_UF_CIRURGIA)
     escolhas <- setNames(
@@ -907,6 +976,12 @@ server <- function(input, output, session) {
   })
 
   dados_diagrama_cirurgia <- reactive({
+
+    req(input$indicador_cirurgia)
+    validate(need(
+      input$indicador_cirurgia != "pnrf",
+      "Diagrama de monitoramento não disponível para o Programa (PNRF) — o histórico ainda é curto demais para gerar faixas de controle confiáveis. Use \"Comparação Anos\" ou a \"Tabela\" para acompanhar o PNRF."
+    ))
 
     serie <- serie_cirurgia_indicador()
     validate(need(!is.null(serie), "Série de cirurgias não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
@@ -931,23 +1006,24 @@ server <- function(input, output, session) {
     ano_comparacao   <- min(dados_uf$ano)
     ano_monitoramento <- max(dados_uf$ano)
 
-    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
+    rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]]
     rotulo_uf <- if (input$uf_cirurgia == "BRASIL") rotulo_agregado(input$regiao_cirurgia) else input$uf_cirurgia
 
     grafico_cirurgia(
       dados_uf, ano_comparacao, ano_monitoramento,
-      titulo = paste0(rotulo_indicador, " — ", rotulo_uf)
+      titulo = paste0(rotulo_indicador, " — ", rotulo_uf),
+      metrica = input$metrica_cirurgia_diagrama
     )
   })
 
   serie_anos_cirurgia_indicador <- reactive({
     req(input$indicador_cirurgia)
-    if (input$indicador_cirurgia == "rol") dados()$cirurgia_anos_rol else dados()$cirurgia_anos_total
+    dados()[[paste0("cirurgia_anos_", input$indicador_cirurgia)]]
   })
 
   serie_municipio_cirurgia_indicador <- reactive({
     req(input$indicador_cirurgia)
-    if (input$indicador_cirurgia == "rol") dados()$cirurgia_municipio_rol else dados()$cirurgia_municipio_total
+    dados()[[paste0("cirurgia_municipio_", input$indicador_cirurgia)]]
   })
 
   # Cascata UF -> Município: só populado quando uma UF específica está
@@ -1020,7 +1096,7 @@ server <- function(input, output, session) {
     dados_uf <- dados_comparacao_anos()
     req(input$metrica_cirurgia_anos)
 
-    rotulo_indicador <- if (input$indicador_cirurgia == "rol") "Cirurgias eletivas do ROL" else "Cirurgias eletivas totais"
+    rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]]
 
     grafico_comparacao_anos(
       dados_uf,
@@ -1032,7 +1108,7 @@ server <- function(input, output, session) {
 
   output$tabela_status_cirurgia <- renderDT({
 
-    serie <- serie_cirurgia_indicador()
+    serie <- serie_cirurgia_indicador_fisica()
     validate(need(!is.null(serie), ""))
     validate(need(length(input$regiao_cirurgia) > 0, ""))
 
