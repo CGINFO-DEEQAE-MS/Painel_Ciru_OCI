@@ -5,6 +5,7 @@ library(DT)
 library(data.table)
 library(readxl)
 library(stringi)
+library(shinyWidgets)
 
 #### CAMINHOS ####
 
@@ -464,6 +465,67 @@ filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especial
   d[, .(quantidade = sum(qt_total_rol, na.rm = TRUE), valor = NA_real_), by = .(ano, mes)]
 }
 
+# Mesmos anos usados no script 02_monitoramento_diagrama_controle.R do
+# projeto Cirurgia (base 2022-2024, comparação 2025, monitoramento 2026).
+DIAGRAMA_ANO_INICIAL_BASE <- 2022L
+DIAGRAMA_ANO_FINAL_BASE <- 2024L
+DIAGRAMA_ANO_COMPARACAO <- 2025L
+DIAGRAMA_ANO_MONITORAMENTO <- 2026L
+
+# Diagrama de controle (quartis) para uma Especialidade do ROL, no recorte
+# de Região/UF selecionado. Reproduz a mesma lógica estatística de
+# executar_monitoramento_quartis() (script 02 do projeto Cirurgia), mas
+# calculada aqui porque "especialidade" só existe no painel (cruzamento com
+# Relacao_cirugiasROL.xlsx, que não faz parte do projeto Cirurgia).
+diagrama_especialidade_rol <- function(serie_proc, mapa, uf_sel, regioes, especialidade_sel) {
+
+  base_indicador <- filtrar_procedimento_rol(
+    serie_proc, mapa, uf_sel, regioes, especialidade_sel, procedimentos_sel = character(0)
+  )
+
+  base_historica <- base_indicador[ano %between% c(DIAGRAMA_ANO_INICIAL_BASE, DIAGRAMA_ANO_FINAL_BASE)]
+
+  validate(need(nrow(base_historica) > 0, "Sem dados históricos suficientes para essa especialidade na seleção atual."))
+
+  faixas <- base_historica[
+    ,
+    .(
+      q1_historico = quantile(quantidade, 0.25, na.rm = TRUE, type = 7),
+      mediana_historica = quantile(quantidade, 0.50, na.rm = TRUE, type = 7),
+      q3_historico = quantile(quantidade, 0.75, na.rm = TRUE, type = 7)
+    ),
+    by = mes
+  ]
+  faixas[
+    ,
+    `:=`(
+      limite_inferior = pmax(q1_historico - 1.5 * (q3_historico - q1_historico), 0),
+      limite_superior = q3_historico + 1.5 * (q3_historico - q1_historico)
+    )
+  ]
+
+  comparacao <- merge(base_indicador[ano == DIAGRAMA_ANO_COMPARACAO], faixas, by = "mes", all.x = TRUE)
+  monitoramento <- merge(base_indicador[ano == DIAGRAMA_ANO_MONITORAMENTO], faixas, by = "mes", all.x = TRUE)
+
+  comparacao[, classificacao := NA_character_]
+  monitoramento[
+    ,
+    classificacao := fcase(
+      is.na(quantidade) | is.na(q1_historico), NA_character_,
+      quantidade < limite_inferior, "Crítico abaixo do limite esperado",
+      quantidade < q1_historico, "Atenção",
+      quantidade > limite_superior, "Acima do limite esperado",
+      quantidade > q3_historico, "Acima do esperado",
+      default = "Esperado"
+    )
+  ]
+
+  dados_uf <- rbind(comparacao, monitoramento, use.names = TRUE)
+  validate(need(nrow(dados_uf) > 0, "Sem dados para a seleção atual."))
+  setorder(dados_uf, ano, mes)
+  dados_uf[]
+}
+
 #### GRÁFICOS ####
 
 # Aplicado a todo gráfico do painel: configura o botão de download nativo do
@@ -880,18 +942,29 @@ ui <- page_navbar(
         selectInput(
           "indicador_cirurgia", "Cirurgias Eletivas",
           choices = c(
-            "Eletivas (MAC e FAEC) totais" = "total",
-            "Eletivas (MAC e FAEC) do Rol" = "rol",
-            "Eletivas do PATE (PNRF)" = "pnrf"
+            "MAC e FAEC totais" = "total",
+            "MAC e FAEC do Rol" = "rol",
+            "Ciru. PATE (PNRF)" = "pnrf"
           ),
           selected = "rol"
         ),
-        selectizeInput(
-          "regiao_cirurgia", "Região",
-          choices = REGIOES, selected = REGIOES, multiple = TRUE,
-          options = list(plugins = list("remove_button"), placeholder = "Selecione ao menos uma região")
+        fluidRow(
+          column(
+            6,
+            pickerInput(
+              "regiao_cirurgia", "Região",
+              choices = REGIOES, selected = REGIOES, multiple = TRUE,
+              options = pickerOptions(
+                actionsBox = TRUE, selectedTextFormat = "count > 2",
+                countSelectedText = "{0} regiões", noneSelectedText = "Nenhuma região"
+              )
+            )
+          ),
+          column(
+            6,
+            selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL")
+          )
         ),
-        selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL"),
         selectInput(
           "municipio_cirurgia", "Município",
           choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
@@ -911,7 +984,7 @@ ui <- page_navbar(
         ),
         div(
           class = "text-muted small mb-2", style = "line-height: 1.3;",
-          "Filtros de Especialidade/Procedimento valem só para \"Comparação Anos\" com o indicador ROL — Físico."
+          "Indicador ROL — Físico: Especialidade vale para \"Comparação Anos\" e \"Diagrama de monitoramento\"; Procedimento só para \"Comparação Anos\"."
         ),
         info_fonte_dados()
       ),
@@ -1064,7 +1137,28 @@ server <- function(input, output, session) {
 
   dados_diagrama_cirurgia <- reactive({
 
-    req(input$indicador_cirurgia)
+    req(input$indicador_cirurgia, input$uf_cirurgia)
+    validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
+
+    especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
+
+    if (input$indicador_cirurgia == "rol" && especialidade_sel != "Todas") {
+
+      validate(need(
+        input$metrica_cirurgia_diagrama == "fisico",
+        "Não há valor financeiro por especialidade ainda — troque para \"Físico\" para usar o filtro de Especialidade no diagrama."
+      ))
+
+      serie_proc <- dados()$cirurgia_procedimento_rol
+      mapa <- dados()$mapa_especialidade_rol
+      validate(need(
+        !is.null(serie_proc) && !is.null(mapa),
+        "Série por procedimento não encontrada. Rode novamente o script 01 do projeto Cirurgia."
+      ))
+
+      return(diagrama_especialidade_rol(serie_proc, mapa, input$uf_cirurgia, input$regiao_cirurgia, especialidade_sel))
+    }
+
     validate(need(
       input$indicador_cirurgia != "pnrf",
       "Diagrama de monitoramento não disponível para o Programa (PNRF) — o histórico ainda é curto demais para gerar faixas de controle confiáveis. Use \"Comparação Anos\" ou a \"Tabela\" para acompanhar o PNRF."
@@ -1072,8 +1166,6 @@ server <- function(input, output, session) {
 
     serie <- serie_cirurgia_indicador()
     validate(need(!is.null(serie), "Série de cirurgias não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
-    req(input$uf_cirurgia)
-    validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
 
     todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
 
@@ -1096,9 +1188,16 @@ server <- function(input, output, session) {
     rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]]
     rotulo_uf <- if (input$uf_cirurgia == "BRASIL") rotulo_agregado(input$regiao_cirurgia) else input$uf_cirurgia
 
+    especialidade_sel <- input$especialidade_cirurgia
+    sufixo_especialidade <- if (isTRUE(input$indicador_cirurgia == "rol") && isTRUE(especialidade_sel != "Todas")) {
+      paste0(" — ", especialidade_sel)
+    } else {
+      ""
+    }
+
     grafico_cirurgia(
       dados_uf, ano_comparacao, ano_monitoramento,
-      titulo = paste0(rotulo_indicador, " — ", rotulo_uf),
+      titulo = paste0(rotulo_indicador, " — ", rotulo_uf, sufixo_especialidade),
       metrica = input$metrica_cirurgia_diagrama
     )
   })
