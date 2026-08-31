@@ -440,7 +440,10 @@ agregar_anos_regiao <- function(serie, regioes) {
 # Filtra a série por procedimento (só ROL, físico) para o recorte de
 # Região/UF da aba, e por Especialidade/Procedimento (cruzando com o mapa).
 # Município não está disponível nessa série (só UF).
-filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especialidade_sel, procedimento_sel) {
+# procedimentos_sel: vetor de códigos (0+ selecionados). Vazio = especialidade
+# inteira; um ou mais códigos = soma só desses procedimentos, juntando os
+# dados de cada um no mesmo total por ano/mês.
+filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especialidade_sel, procedimentos_sel) {
 
   d <- serie_proc
 
@@ -451,8 +454,8 @@ filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especial
     d <- d[uf_atendimento %chin% ufs]
   }
 
-  if (procedimento_sel != "Todos") {
-    d <- d[codigo_procedimento_principal == procedimento_sel]
+  if (length(procedimentos_sel) > 0) {
+    d <- d[codigo_procedimento_principal %chin% procedimentos_sel]
   } else if (especialidade_sel != "Todas") {
     codigos <- mapa[especialidade == especialidade_sel]$codigo_procedimento_principal
     d <- d[codigo_procedimento_principal %chin% codigos]
@@ -874,18 +877,19 @@ ui <- page_navbar(
     layout_sidebar(
       sidebar = sidebar(
         open = "always",
-        radioButtons(
-          "indicador_cirurgia", "Indicador",
+        selectInput(
+          "indicador_cirurgia", "Cirurgias Eletivas",
           choices = c(
-            "Cirurgias Eletivas (MAC e FAEC) do ROL" = "rol",
-            "Cirurgias Eletivas (MAC e FAEC) totais" = "total",
-            "Cirurgias Eletivas do Programa (PNRF)" = "pnrf"
+            "Eletivas (MAC e FAEC) totais" = "total",
+            "Eletivas (MAC e FAEC) do Rol" = "rol",
+            "Eletivas do PATE (PNRF)" = "pnrf"
           ),
           selected = "rol"
         ),
-        checkboxGroupInput(
+        selectizeInput(
           "regiao_cirurgia", "Região",
-          choices = REGIOES, selected = REGIOES
+          choices = REGIOES, selected = REGIOES, multiple = TRUE,
+          options = list(plugins = list("remove_button"), placeholder = "Selecione ao menos uma região")
         ),
         selectInput("uf_cirurgia", "UF", choices = "BRASIL", selected = "BRASIL"),
         selectInput(
@@ -900,9 +904,10 @@ ui <- page_navbar(
           "especialidade_cirurgia", "Especialidade",
           choices = c("Todas" = "Todas"), selected = "Todas"
         ),
-        selectInput(
+        selectizeInput(
           "procedimento_cirurgia", "Procedimento",
-          choices = c("Todos" = "Todos"), selected = "Todos"
+          choices = character(0), selected = character(0), multiple = TRUE,
+          options = list(plugins = list("remove_button"), placeholder = "Todos (especialidade inteira)")
         ),
         div(
           class = "text-muted small mb-2", style = "line-height: 1.3;",
@@ -1146,25 +1151,24 @@ server <- function(input, output, session) {
   }, once = TRUE)
 
   # Cascata Especialidade -> Procedimento: só populado quando uma
-  # especialidade específica está selecionada.
+  # especialidade específica está selecionada. Multisseleção — nenhum
+  # procedimento marcado significa "especialidade inteira" (ver
+  # dados_comparacao_anos() / filtrar_procedimento_rol()).
   observeEvent(list(input$especialidade_cirurgia, dados()$mapa_especialidade_rol), {
 
     mapa <- dados()$mapa_especialidade_rol
 
     if (is.null(mapa) || is.null(input$especialidade_cirurgia) || input$especialidade_cirurgia == "Todas") {
-      updateSelectInput(session, "procedimento_cirurgia", choices = c("Todos" = "Todos"), selected = "Todos")
+      updateSelectizeInput(session, "procedimento_cirurgia", choices = character(0), selected = character(0))
       return()
     }
 
     procedimentos <- mapa[especialidade == input$especialidade_cirurgia][order(nome_procedimento)]
-    escolhas <- setNames(
-      c("Todos", procedimentos$codigo_procedimento_principal),
-      c("Todos (especialidade inteira)", procedimentos$nome_procedimento)
-    )
+    escolhas <- setNames(procedimentos$codigo_procedimento_principal, procedimentos$nome_procedimento)
 
-    selecionado <- if (isTRUE(input$procedimento_cirurgia %in% escolhas)) input$procedimento_cirurgia else "Todos"
+    selecionado <- intersect(input$procedimento_cirurgia, escolhas)
 
-    updateSelectInput(session, "procedimento_cirurgia", choices = escolhas, selected = selecionado)
+    updateSelectizeInput(session, "procedimento_cirurgia", choices = escolhas, selected = selecionado)
   })
 
   # Dados por trás do gráfico "Comparação Anos" e da tabela abaixo dele —
@@ -1175,8 +1179,8 @@ server <- function(input, output, session) {
     validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
 
     especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
-    procedimento_sel <- if (is.null(input$procedimento_cirurgia)) "Todos" else input$procedimento_cirurgia
-    filtro_procedimento_ativo <- especialidade_sel != "Todas" || procedimento_sel != "Todos"
+    procedimentos_sel <- input$procedimento_cirurgia
+    filtro_procedimento_ativo <- especialidade_sel != "Todas" || length(procedimentos_sel) > 0
 
     if (filtro_procedimento_ativo) {
 
@@ -1201,7 +1205,7 @@ server <- function(input, output, session) {
         uf_sel = input$uf_cirurgia,
         regioes = input$regiao_cirurgia,
         especialidade_sel = especialidade_sel,
-        procedimento_sel = procedimento_sel
+        procedimentos_sel = procedimentos_sel
       )
 
     } else {
@@ -1252,16 +1256,23 @@ server <- function(input, output, session) {
   rotulo_procedimento_cirurgia <- reactive({
 
     especialidade_sel <- input$especialidade_cirurgia
-    procedimento_sel <- input$procedimento_cirurgia
+    procedimentos_sel <- input$procedimento_cirurgia
 
     if (isTRUE(input$indicador_cirurgia != "rol") || is.null(especialidade_sel) || especialidade_sel == "Todas") {
       return("")
     }
 
-    if (isTRUE(procedimento_sel != "Todos")) {
+    if (length(procedimentos_sel) > 0) {
       mapa <- dados()$mapa_especialidade_rol
-      nome <- if (!is.null(mapa)) mapa[codigo_procedimento_principal == procedimento_sel]$nome_procedimento[1] else NA
-      paste0(" — ", especialidade_sel, " — ", if (!is.na(nome)) nome else procedimento_sel)
+      nomes <- if (!is.null(mapa)) mapa[codigo_procedimento_principal %chin% procedimentos_sel]$nome_procedimento else procedimentos_sel
+
+      sufixo <- if (length(nomes) <= 2) {
+        paste(nomes, collapse = "; ")
+      } else {
+        paste0(length(nomes), " procedimentos selecionados")
+      }
+
+      paste0(" — ", especialidade_sel, " — ", sufixo)
     } else {
       paste0(" — ", especialidade_sel)
     }
