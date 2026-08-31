@@ -174,6 +174,46 @@ carregar_serie_municipio_cirurgia <- function(indicador) {
   dt[]
 }
 
+# Série por UF e procedimento, só do indicador ROL — usada pelos filtros de
+# Especialidade/Procedimento em "Comparação Anos". Cruza pelo código SIGTAP
+# com a planilha de mapeamento (ver carregar_mapa_especialidade_rol()).
+carregar_serie_procedimento_rol <- function() {
+
+  arquivo <- localizar_arquivo(
+    DIR_TABELAS_CIRURGIA,
+    "^cirurgias_mensal_procedimento_rol_.*\\.csv$"
+  )
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, encoding = "UTF-8")
+  dt[, uf_atendimento := toupper(uf_atendimento)]
+  dt[, codigo_procedimento_principal := as.character(as.integer(codigo_procedimento_principal))]
+  dt[]
+}
+
+# Mapeamento código SIGTAP -> Especialidade, mantido manualmente em
+# dados/Relacao_cirugiasROL.xlsx (não é sincronizado do projeto Cirurgia —
+# é uma planilha de referência própria do painel).
+carregar_mapa_especialidade_rol <- function() {
+
+  arquivo <- file.path("dados", "Relacao_cirugiasROL.xlsx")
+
+  if (!file.exists(arquivo)) {
+    return(NULL)
+  }
+
+  mapa <- setDT(as.data.frame(read_excel(arquivo)))
+  setnames(mapa, c("codigo_procedimento_principal", "nome_procedimento", "especialidade"))
+
+  mapa[, codigo_procedimento_principal := as.character(as.integer(codigo_procedimento_principal))]
+  mapa[, especialidade := stri_trans_totitle(especialidade)]
+  mapa[, nome_procedimento := stri_trans_totitle(nome_procedimento)]
+  mapa[]
+}
+
 status_cirurgia <- function(serie) {
 
   if (is.null(serie)) {
@@ -274,6 +314,9 @@ sincronizar_dados_locais <- function() {
   origem_cirurgia <- file.path(
     CIRURGIA_DIR_ORIGEM, "resultados", "tabelas", "monitoramento_diagrama_controle"
   )
+  origem_cirurgia_bases <- file.path(
+    CIRURGIA_DIR_ORIGEM, "resultados", "bases_processadas"
+  )
   origem_oci <- file.path(OCI_DIR_ORIGEM, "resultados")
 
   arquivos <- c(
@@ -289,6 +332,7 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_total_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pnrf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia_bases, "^cirurgias_mensal_procedimento_rol_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_uf\\.csv$"),
@@ -316,6 +360,8 @@ carregar_tudo <- function() {
     cirurgia_municipio_rol = carregar_serie_municipio_cirurgia("rol"),
     cirurgia_municipio_total = carregar_serie_municipio_cirurgia("total"),
     cirurgia_municipio_pnrf = carregar_serie_municipio_cirurgia("pnrf"),
+    cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
+    mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
     oci_serie = carregar_serie_oci(),
     oci_status = carregar_status_oci(),
     oci_especialidade = carregar_oci_especialidade(),
@@ -389,6 +435,30 @@ agregar_anos_regiao <- function(serie, regioes) {
     .(quantidade = sum(quantidade, na.rm = TRUE), valor = sum(valor, na.rm = TRUE)),
     by = .(ano, mes)
   ]
+}
+
+# Filtra a série por procedimento (só ROL, físico) para o recorte de
+# Região/UF da aba, e por Especialidade/Procedimento (cruzando com o mapa).
+# Município não está disponível nessa série (só UF).
+filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especialidade_sel, procedimento_sel) {
+
+  d <- serie_proc
+
+  if (uf_sel != "BRASIL") {
+    d <- d[uf_atendimento == uf_sel]
+  } else if (!setequal(regioes, REGIOES)) {
+    ufs <- UF_REF[REGIAO %in% regioes]$NM_UF_CIRURGIA
+    d <- d[uf_atendimento %chin% ufs]
+  }
+
+  if (procedimento_sel != "Todos") {
+    d <- d[codigo_procedimento_principal == procedimento_sel]
+  } else if (especialidade_sel != "Todas") {
+    codigos <- mapa[especialidade == especialidade_sel]$codigo_procedimento_principal
+    d <- d[codigo_procedimento_principal %chin% codigos]
+  }
+
+  d[, .(quantidade = sum(qt_total_rol, na.rm = TRUE), valor = NA_real_), by = .(ano, mes)]
 }
 
 #### GRÁFICOS ####
@@ -826,6 +896,18 @@ ui <- page_navbar(
           class = "text-muted small mb-2", style = "line-height: 1.3;",
           "Filtro de Município vale só para \"Comparação Anos\" — o Diagrama de monitoramento e a Tabela continuam por UF/Região."
         ),
+        selectInput(
+          "especialidade_cirurgia", "Especialidade",
+          choices = c("Todas" = "Todas"), selected = "Todas"
+        ),
+        selectInput(
+          "procedimento_cirurgia", "Procedimento",
+          choices = c("Todos" = "Todos"), selected = "Todos"
+        ),
+        div(
+          class = "text-muted small mb-2", style = "line-height: 1.3;",
+          "Filtros de Especialidade/Procedimento valem só para \"Comparação Anos\" com o indicador ROL — Físico."
+        ),
         info_fonte_dados()
       ),
       tabsetPanel(
@@ -1045,35 +1127,109 @@ server <- function(input, output, session) {
     updateSelectInput(session, "municipio_cirurgia", choices = escolhas, selected = selecionado)
   })
 
+  # Popula as opções de Especialidade a partir da planilha de mapeamento
+  # (só existe para o indicador ROL — ver carregar_mapa_especialidade_rol()).
+  observeEvent(dados(), {
+
+    mapa <- dados()$mapa_especialidade_rol
+
+    if (is.null(mapa)) {
+      return()
+    }
+
+    especialidades <- sort(unique(mapa$especialidade))
+    escolhas <- setNames(c("Todas", especialidades), c("Todas", especialidades))
+
+    selecionado <- if (isTRUE(input$especialidade_cirurgia %in% escolhas)) input$especialidade_cirurgia else "Todas"
+
+    updateSelectInput(session, "especialidade_cirurgia", choices = escolhas, selected = selecionado)
+  }, once = TRUE)
+
+  # Cascata Especialidade -> Procedimento: só populado quando uma
+  # especialidade específica está selecionada.
+  observeEvent(list(input$especialidade_cirurgia, dados()$mapa_especialidade_rol), {
+
+    mapa <- dados()$mapa_especialidade_rol
+
+    if (is.null(mapa) || is.null(input$especialidade_cirurgia) || input$especialidade_cirurgia == "Todas") {
+      updateSelectInput(session, "procedimento_cirurgia", choices = c("Todos" = "Todos"), selected = "Todos")
+      return()
+    }
+
+    procedimentos <- mapa[especialidade == input$especialidade_cirurgia][order(nome_procedimento)]
+    escolhas <- setNames(
+      c("Todos", procedimentos$codigo_procedimento_principal),
+      c("Todos (especialidade inteira)", procedimentos$nome_procedimento)
+    )
+
+    selecionado <- if (isTRUE(input$procedimento_cirurgia %in% escolhas)) input$procedimento_cirurgia else "Todos"
+
+    updateSelectInput(session, "procedimento_cirurgia", choices = escolhas, selected = selecionado)
+  })
+
   # Dados por trás do gráfico "Comparação Anos" e da tabela abaixo dele —
   # reactive compartilhada para não duplicar a lógica de filtro.
   dados_comparacao_anos <- reactive({
 
-    serie <- serie_anos_cirurgia_indicador()
-    validate(need(!is.null(serie), "Série multianual não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
-    req(input$uf_cirurgia)
+    req(input$indicador_cirurgia, input$uf_cirurgia)
     validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
 
-    municipio_sel <- input$municipio_cirurgia
-    usar_municipio <- isTRUE(input$uf_cirurgia != "BRASIL") && !is.null(municipio_sel) && municipio_sel != "Todos"
+    especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
+    procedimento_sel <- if (is.null(input$procedimento_cirurgia)) "Todos" else input$procedimento_cirurgia
+    filtro_procedimento_ativo <- especialidade_sel != "Todas" || procedimento_sel != "Todos"
 
-    if (usar_municipio) {
-      serie_mun <- serie_municipio_cirurgia_indicador()
-      validate(need(!is.null(serie_mun), "Série por município não encontrada. Rode novamente os scripts 01 e 02 do projeto Cirurgia."))
-      dados_uf <- serie_mun[
-        uf_atendimento == input$uf_cirurgia & municipio_atendimento == municipio_sel,
-        .(ano, mes, quantidade, valor)
-      ]
+    if (filtro_procedimento_ativo) {
+
+      validate(need(
+        input$indicador_cirurgia == "rol",
+        "Filtros de Especialidade/Procedimento valem só para o indicador ROL. Selecione ROL, ou volte a Especialidade/Procedimento para \"Todas\"/\"Todos\"."
+      ))
+      validate(need(
+        input$metrica_cirurgia_anos == "fisico",
+        "Não há valor financeiro — troque para \"Físico\" para usar os filtros de Especialidade/Procedimento."
+      ))
+
+      serie_proc <- dados()$cirurgia_procedimento_rol
+      mapa <- dados()$mapa_especialidade_rol
+      validate(need(
+        !is.null(serie_proc) && !is.null(mapa),
+        "Série por procedimento não encontrada. Rode novamente o script 01 do projeto Cirurgia."
+      ))
+
+      dados_uf <- filtrar_procedimento_rol(
+        serie_proc, mapa,
+        uf_sel = input$uf_cirurgia,
+        regioes = input$regiao_cirurgia,
+        especialidade_sel = especialidade_sel,
+        procedimento_sel = procedimento_sel
+      )
+
     } else {
-      todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
-      dados_uf <- if (input$uf_cirurgia == "BRASIL") {
-        if (todas_regioes) {
-          serie[uf_atendimento == "BRASIL", .(ano, mes, quantidade, valor)]
-        } else {
-          agregar_anos_regiao(serie, input$regiao_cirurgia)
-        }
+
+      serie <- serie_anos_cirurgia_indicador()
+      validate(need(!is.null(serie), "Série multianual não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
+
+      municipio_sel <- input$municipio_cirurgia
+      usar_municipio <- isTRUE(input$uf_cirurgia != "BRASIL") && !is.null(municipio_sel) && municipio_sel != "Todos"
+
+      if (usar_municipio) {
+        serie_mun <- serie_municipio_cirurgia_indicador()
+        validate(need(!is.null(serie_mun), "Série por município não encontrada. Rode novamente os scripts 01 e 02 do projeto Cirurgia."))
+        dados_uf <- serie_mun[
+          uf_atendimento == input$uf_cirurgia & municipio_atendimento == municipio_sel,
+          .(ano, mes, quantidade, valor)
+        ]
       } else {
-        serie[uf_atendimento == input$uf_cirurgia, .(ano, mes, quantidade, valor)]
+        todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
+        dados_uf <- if (input$uf_cirurgia == "BRASIL") {
+          if (todas_regioes) {
+            serie[uf_atendimento == "BRASIL", .(ano, mes, quantidade, valor)]
+          } else {
+            agregar_anos_regiao(serie, input$regiao_cirurgia)
+          }
+        } else {
+          serie[uf_atendimento == input$uf_cirurgia, .(ano, mes, quantidade, valor)]
+        }
       }
     }
 
@@ -1091,6 +1247,26 @@ server <- function(input, output, session) {
     }
   })
 
+  # Sufixo do título com Especialidade/Procedimento, quando um filtro
+  # estiver ativo (só se aplica com ROL selecionado — ver dados_comparacao_anos()).
+  rotulo_procedimento_cirurgia <- reactive({
+
+    especialidade_sel <- input$especialidade_cirurgia
+    procedimento_sel <- input$procedimento_cirurgia
+
+    if (isTRUE(input$indicador_cirurgia != "rol") || is.null(especialidade_sel) || especialidade_sel == "Todas") {
+      return("")
+    }
+
+    if (isTRUE(procedimento_sel != "Todos")) {
+      mapa <- dados()$mapa_especialidade_rol
+      nome <- if (!is.null(mapa)) mapa[codigo_procedimento_principal == procedimento_sel]$nome_procedimento[1] else NA
+      paste0(" — ", especialidade_sel, " — ", if (!is.na(nome)) nome else procedimento_sel)
+    } else {
+      paste0(" — ", especialidade_sel)
+    }
+  })
+
   output$grafico_comparacao_anos <- renderPlotly({
 
     dados_uf <- dados_comparacao_anos()
@@ -1100,7 +1276,10 @@ server <- function(input, output, session) {
 
     grafico_comparacao_anos(
       dados_uf,
-      titulo = paste0(rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia()),
+      titulo = paste0(
+        rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia(),
+        rotulo_procedimento_cirurgia()
+      ),
       metrica = input$metrica_cirurgia_anos
     )
   })
