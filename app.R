@@ -78,12 +78,15 @@ ORDEM_COMPONENTES_OCI <- c(
   "Componente Ambulatorial", "Carretas", "Créditos Financeiros", "Equipes Volantes"
 )
 
+# Mesmas cores do gráfico de referência do projeto OCI (por
+# componente/modalidade) — mantidas exatamente iguais nos gráficos do
+# painel que quebram por componente.
 CORES_COMPONENTE_OCI <- c(
-  "Total geral de OCI"    = "#12283D",
-  "Componente Ambulatorial" = "#185FA5",
-  "Carretas"                = "#D85A30",
-  "Créditos Financeiros"    = "#2e8b57",
-  "Equipes Volantes"        = "#a4508b"
+  "Total geral de OCI"    = "#185FA5",
+  "Componente Ambulatorial" = "#FDB528",
+  "Carretas"                = "#E4302B",
+  "Créditos Financeiros"    = "#8FD9C4",
+  "Equipes Volantes"        = "#9AD4E8"
 )
 
 # Escolhas do filtro de componente na subaba "Série histórica OCI por
@@ -283,51 +286,6 @@ carregar_serie_oci <- function() {
   longo[]
 }
 
-carregar_status_oci <- function() {
-
-  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$")
-
-  if (is.na(arquivo)) {
-    return(NULL)
-  }
-
-  dt <- fread(arquivo, sep = ";", dec = ",", encoding = "UTF-8")
-  dt[, NM_UF := toupper(NM_UF)]
-  dt <- merge(dt, UF_REF[, .(NM_UF_OCI, REGIAO)], by.x = "NM_UF", by.y = "NM_UF_OCI", all.x = TRUE)
-  dt[]
-}
-
-carregar_oci_especialidade <- function() {
-
-  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^oci_mensal_especialidade_uf\\.csv$")
-
-  if (is.na(arquivo)) {
-    return(NULL)
-  }
-
-  dt <- fread(arquivo, sep = ";", dec = ",", encoding = "UTF-8")
-  dt[, NM_UF := toupper(NM_UF)]
-  dt[, competencia := as.Date(sprintf("%04d-%02d-01", ANO, MES))]
-  dt[]
-}
-
-# Mesmo esquema de carregar_oci_especialidade(), granularidade de município
-# (usado pelo filtro de Município em "Série histórica" e "Comparativos").
-carregar_oci_especialidade_municipio <- function() {
-
-  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^oci_mensal_especialidade_municipio\\.csv$")
-
-  if (is.na(arquivo)) {
-    return(NULL)
-  }
-
-  dt <- fread(arquivo, sep = ";", dec = ",", encoding = "UTF-8")
-  dt[, NM_UF := toupper(NM_UF)]
-  dt[, MUNICIPIO := toupper(MUNICIPIO)]
-  dt[, competencia := as.Date(sprintf("%04d-%02d-01", ANO, MES))]
-  dt[]
-}
-
 # Quebra por UF/especialidade/componente-modalidade (Componente Ambulatorial,
 # Carretas, Créditos Financeiros, Equipes Volantes), usada pelo gráfico de
 # componentes em "Série histórica OCI" e pela subaba "Por especialidade".
@@ -395,9 +353,6 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia_bases, "^cirurgias_mensal_procedimento_rol_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
-    localizar_arquivo(origem_oci, "^tabela_status_OCI_planilhao_[0-9_]+\\.csv$"),
-    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_uf\\.csv$"),
-    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_municipio\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_municipio\\.csv$")
   )
@@ -426,9 +381,6 @@ carregar_tudo <- function() {
     cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
     mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
     oci_serie = carregar_serie_oci(),
-    oci_status = carregar_status_oci(),
-    oci_especialidade = carregar_oci_especialidade(),
-    oci_especialidade_municipio = carregar_oci_especialidade_municipio(),
     oci_especialidade_componente_uf = carregar_oci_especialidade_componente_uf(),
     oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio()
   )
@@ -778,65 +730,31 @@ grafico_comparacao_anos <- function(dados, titulo, metrica = "fisico") {
     alta_resolucao("comparacao_anos_cirurgias")
 }
 
-grafico_oci <- function(dados, titulo) {
-
-  d <- dados[order(competencia)]
-  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
-  ultimo <- d[which.max(competencia)]
-
-  datas_unicas <- sort(unique(d$competencia))
-
-  plot_ly() |>
-    add_trace(
-      data = d, x = ~competencia, y = ~oci, type = "scatter", mode = "lines",
-      fill = "tozeroy", fillcolor = "rgba(24,95,165,0.10)",
-      line = list(color = "#185FA5", width = 2.2), name = "OCI realizadas",
-      text = ~rotulo_mes,
-      hovertemplate = "%{text}<br>OCI: %{y:,.0f}<extra></extra>"
-    ) |>
-    add_trace(
-      data = ultimo, x = ~competencia, y = ~oci, type = "scatter", mode = "markers",
-      marker = list(color = "white", line = list(color = "#D85A30", width = 2), size = 10),
-      name = "Último mês", hoverinfo = "skip"
-    ) |>
-    layout(
-      title = list(text = titulo, x = 0),
-      xaxis = list(
-        title = "Mês de atendimento",
-        tickmode = "array",
-        tickvals = datas_unicas,
-        ticktext = rotular_mes_ano_pt(datas_unicas),
-        tickangle = -45
-      ),
-      yaxis = list(title = "OCI realizadas", tickformat = ",.0f", rangemode = "tozero"),
-      shapes = list(list(
-        type = "line", x0 = DATA_VIRADA_OCI, x1 = DATA_VIRADA_OCI, y0 = 0, y1 = 1, yref = "paper",
-        line = list(color = "#D85A30", dash = "dash", width = 1.2)
-      )),
-      showlegend = FALSE,
-      separators = ",.",
-      margin = list(b = 90)
-    ) |>
-    alta_resolucao("diagrama_monitoramento_oci")
-}
-
-# Gráfico com "Total geral de OCI" e uma linha por componente/modalidade
+# Gráfico "OCI geral": onda de área com o Total geral de OCI (mesmo estilo
+# visual do gráfico original) mais uma linha por componente/modalidade
 # (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes
 # Volantes) — clicar na legenda do Plotly liga/desliga cada linha.
 grafico_oci_componente <- function(dados_geral, dados_componente, titulo) {
 
   dg <- dados_geral[order(competencia)]
   dg[, rotulo_mes := rotular_mes_ano_pt(competencia)]
+  ultimo <- dg[which.max(competencia)]
 
   datas_unicas <- sort(unique(dg$competencia))
 
   p <- plot_ly() |>
     add_trace(
       data = dg, x = ~competencia, y = ~oci, type = "scatter", mode = "lines",
+      fill = "tozeroy", fillcolor = "rgba(24,95,165,0.10)",
       name = "Total geral de OCI",
-      line = list(color = CORES_COMPONENTE_OCI[["Total geral de OCI"]], width = 3),
+      line = list(color = CORES_COMPONENTE_OCI[["Total geral de OCI"]], width = 2.2),
       text = ~rotulo_mes,
       hovertemplate = "Total geral de OCI<br>%{text}<br>OCI: %{y:,.0f}<extra></extra>"
+    ) |>
+    add_trace(
+      data = ultimo, x = ~competencia, y = ~oci, type = "scatter", mode = "markers",
+      marker = list(color = "white", line = list(color = "#D85A30", width = 2), size = 10),
+      name = "Último mês", hoverinfo = "skip", showlegend = FALSE
     )
 
   for (componente_atual in ORDEM_COMPONENTES_OCI) {
@@ -863,12 +781,109 @@ grafico_oci_componente <- function(dados_geral, dados_componente, titulo) {
         tickangle = -45
       ),
       yaxis = list(title = "OCI realizadas", tickformat = ",.0f", rangemode = "tozero"),
+      shapes = list(list(
+        type = "line", x0 = DATA_VIRADA_OCI, x1 = DATA_VIRADA_OCI, y0 = 0, y1 = 1, yref = "paper",
+        line = list(color = "#D85A30", dash = "dash", width = 1.2)
+      )),
       hovermode = "x unified",
       legend = list(orientation = "h", y = -0.3),
       margin = list(b = 110),
       separators = ",."
     ) |>
-    alta_resolucao("oci_por_componente")
+    alta_resolucao("oci_geral_por_componente")
+}
+
+# Barras empilhadas HORIZONTAIS por ano — total acumulado por
+# componente/modalidade, mesmo estilo do gráfico de referência (SIA/SUS e
+# CMD). Fica em cima, com o gráfico por mês logo abaixo.
+grafico_oci_componente_ano <- function(dados, titulo) {
+
+  d <- dados[, .(OCI = sum(OCI, na.rm = TRUE)), by = .(ANO, COMPONENTE)]
+  totais_ano <- d[, .(total = sum(OCI, na.rm = TRUE)), by = ANO]
+  setorder(totais_ano, ANO)
+
+  p <- plot_ly()
+
+  for (componente_atual in ORDEM_COMPONENTES_OCI) {
+    dd <- d[COMPONENTE == componente_atual]
+    if (nrow(dd) == 0) next
+    p <- add_trace(
+      p, data = dd, y = ~as.character(ANO), x = ~OCI, type = "bar", orientation = "h",
+      name = componente_atual,
+      marker = list(color = CORES_COMPONENTE_OCI[[componente_atual]]),
+      hovertemplate = paste0(componente_atual, "<br>%{y}<br>OCI: %{x:,.0f}<extra></extra>")
+    )
+  }
+
+  p |>
+    layout(
+      title = list(text = titulo, x = 0, font = list(size = 13)),
+      barmode = "stack",
+      xaxis = list(title = "OCI realizadas", tickformat = ",.0f"),
+      # Range fixo: com annotations usando xshift, o autorange do Plotly.js
+      # num eixo categórico se confunde e infla a escala (bug conhecido) —
+      # travando o range em [-0.5, n-0.5] cada categoria fica corretamente
+      # espaçada.
+      yaxis = list(
+        title = "", type = "category",
+        range = c(-0.5, nrow(totais_ano) - 0.5), autorange = FALSE
+      ),
+      annotations = lapply(seq_len(nrow(totais_ano)), function(i) {
+        list(
+          x = totais_ano$total[i], y = as.character(totais_ano$ANO[i]),
+          text = format(totais_ano$total[i], big.mark = ".", scientific = FALSE),
+          showarrow = FALSE, xanchor = "left", xshift = 8,
+          font = list(size = 12, color = "#12283D")
+        )
+      }),
+      showlegend = FALSE,
+      separators = ",.",
+      margin = list(l = 60, b = 40, t = 40)
+    ) |>
+    alta_resolucao("oci_componente_ano")
+}
+
+# Mesmo esquema de colunas empilhadas por componente/modalidade, mas por
+# mês de atendimento (toda a série, não só o total do ano) — fica logo
+# abaixo do gráfico por ano.
+grafico_oci_componente_mes <- function(dados, titulo) {
+
+  d <- dados[order(competencia)]
+  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
+
+  datas_unicas <- sort(unique(d$competencia))
+
+  p <- plot_ly()
+
+  for (componente_atual in ORDEM_COMPONENTES_OCI) {
+    dd <- d[COMPONENTE == componente_atual][order(competencia)]
+    if (nrow(dd) == 0) next
+    p <- add_trace(
+      p, data = dd, x = ~competencia, y = ~OCI, type = "bar",
+      name = componente_atual,
+      marker = list(color = CORES_COMPONENTE_OCI[[componente_atual]]),
+      hovertext = ~rotulo_mes,
+      hovertemplate = paste0(componente_atual, "<br>%{hovertext}<br>OCI: %{y:,.0f}<extra></extra>")
+    )
+  }
+
+  p |>
+    layout(
+      title = list(text = titulo, x = 0),
+      barmode = "stack",
+      xaxis = list(
+        title = "Mês de atendimento",
+        tickmode = "array",
+        tickvals = datas_unicas,
+        ticktext = rotular_mes_ano_pt(datas_unicas),
+        tickangle = -45
+      ),
+      yaxis = list(title = "OCI realizadas", tickformat = ",.0f"),
+      legend = list(orientation = "h", y = -0.35),
+      margin = list(b = 110),
+      separators = ",."
+    ) |>
+    alta_resolucao("oci_componente_mes")
 }
 
 grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) {
@@ -921,6 +936,53 @@ grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) 
       separators = ",."
     ) |>
     alta_resolucao("oci_por_especialidade")
+}
+
+# Colunas empilhadas por especialidade e componente/modalidade — total
+# acumulado do período filtrado, ordenado por total decrescente e com
+# rótulo de valor em cada segmento, igual ao gráfico de referência.
+grafico_oci_especialidade_componente <- function(dados, titulo) {
+
+  d <- dados[, .(OCI = sum(OCI, na.rm = TRUE)), by = .(ESPECIALIDADE, COMPONENTE)]
+
+  totais_especialidade <- d[, .(total = sum(OCI, na.rm = TRUE)), by = ESPECIALIDADE]
+  setorder(totais_especialidade, -total)
+  ordem_especialidade <- as.character(totais_especialidade$ESPECIALIDADE)
+  d[, ESPECIALIDADE := factor(ESPECIALIDADE, levels = ordem_especialidade)]
+
+  # Ordem de empilhamento (de baixo para cima), igual ao gráfico de referência.
+  ordem_pilha <- c("Carretas", "Componente Ambulatorial", "Créditos Financeiros", "Equipes Volantes")
+  cor_texto_pilha <- c(
+    "Carretas" = "white", "Componente Ambulatorial" = "#12283D",
+    "Créditos Financeiros" = "#12283D", "Equipes Volantes" = "#12283D"
+  )
+
+  p <- plot_ly()
+
+  for (componente_atual in ordem_pilha) {
+    dd <- d[COMPONENTE == componente_atual]
+    if (nrow(dd) == 0) next
+    p <- add_trace(
+      p, data = dd, x = ~ESPECIALIDADE, y = ~OCI, type = "bar",
+      name = componente_atual,
+      marker = list(color = CORES_COMPONENTE_OCI[[componente_atual]]),
+      texttemplate = "%{y:,.0f}", textposition = "inside", insidetextanchor = "middle",
+      textfont = list(size = 10, color = cor_texto_pilha[[componente_atual]]),
+      hovertemplate = paste0(componente_atual, "<br>%{x}<br>OCI: %{y:,.0f}<extra></extra>")
+    )
+  }
+
+  p |>
+    layout(
+      title = list(text = titulo, x = 0),
+      barmode = "stack",
+      xaxis = list(title = "", categoryorder = "array", categoryarray = ordem_especialidade),
+      yaxis = list(title = "OCI realizadas", tickformat = ",.0f"),
+      legend = list(orientation = "h", y = -0.3),
+      margin = list(b = 90),
+      separators = ",."
+    ) |>
+    alta_resolucao("oci_especialidade_componente")
 }
 
 grafico_oci_fisico_especialidade <- function(dados, titulo) {
@@ -1011,6 +1073,18 @@ info_fonte_dados <- function() {
   )
 }
 
+# Nota de fonte específica da aba OCI (DRAC/SAES/MS, com data de
+# atualização e datas de extração por sistema de origem).
+info_fonte_dados_oci <- function() {
+  div(
+    class = "text-muted small mt-3",
+    style = "line-height: 1.4;",
+    p("Fonte: DRAC/SAES/MS. Atualizado em 24/08/2026."),
+    p("Fonte: SIA (extração em 12/08/2026), e CMD (extração em 24/08/2026)."),
+    p(tags$em("Sujeito a alterações."))
+  )
+}
+
 # Linha compacta de exportação abaixo de cada gráfico: dados brutos em CSV e
 # o mesmo gráfico como objeto nativo/editável do PowerPoint (não uma
 # imagem). O PNG em alta resolução continua no ícone de câmera do Plotly.
@@ -1034,7 +1108,8 @@ ui <- page_navbar(
       "document.addEventListener('shown.bs.tab', function (e) {
          [
            'grafico_cirurgia', 'grafico_comparacao_anos',
-           'grafico_oci', 'grafico_oci_especialidade',
+           'grafico_oci_componente', 'grafico_oci_componente_ano', 'grafico_oci_componente_mes',
+           'grafico_oci_especialidade', 'grafico_oci_especialidade_componente',
            'grafico_oci_fisico_especialidade', 'grafico_oci_mensal_anos'
          ].forEach(function (id) {
            var el = document.getElementById(id);
@@ -1154,9 +1229,9 @@ ui <- page_navbar(
         ),
         div(
           class = "text-muted small mb-2", style = "line-height: 1.3;",
-          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\" — a Tabela de status continua por UF/Região."
+          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\"."
         ),
-        info_fonte_dados()
+        info_fonte_dados_oci()
       ),
       tabsetPanel(
         id = "subaba_oci",
@@ -1165,12 +1240,16 @@ ui <- page_navbar(
           "Série histórica OCI",
           br(),
           h5("OCI geral"),
-          plotlyOutput("grafico_oci", height = "40vh"),
-          barra_downloads("grafico_oci"),
-          br(),
-          h5("Por componente"),
           plotlyOutput("grafico_oci_componente", height = "44vh"),
-          barra_downloads("grafico_oci_componente")
+          barra_downloads("grafico_oci_componente"),
+          br(),
+          h5("OCI por componente — por ano"),
+          plotlyOutput("grafico_oci_componente_ano", height = "26vh"),
+          barra_downloads("grafico_oci_componente_ano"),
+          br(),
+          h5("OCI por componente — por mês de atendimento"),
+          plotlyOutput("grafico_oci_componente_mes", height = "40vh"),
+          barra_downloads("grafico_oci_componente_mes")
         ),
         tabPanel(
           "Série histórica OCI por especialidade",
@@ -1193,15 +1272,31 @@ ui <- page_navbar(
             )
           ),
           plotlyOutput("grafico_oci_especialidade", height = "50vh"),
-          barra_downloads("grafico_oci_especialidade")
+          barra_downloads("grafico_oci_especialidade"),
+          br(),
+          h5("OCI por especialidade e componente"),
+          plotlyOutput("grafico_oci_especialidade_componente", height = "50vh"),
+          barra_downloads("grafico_oci_especialidade_componente")
         ),
         tabPanel(
           "Comparativos",
           br(),
-          checkboxGroupInput(
-            "especialidades_oci_comparativos", "Especialidades",
-            choices = ORDEM_ESPECIALIDADES, selected = ORDEM_ESPECIALIDADES,
-            inline = TRUE
+          fluidRow(
+            column(
+              8,
+              checkboxGroupInput(
+                "especialidades_oci_comparativos", "Especialidades",
+                choices = ORDEM_ESPECIALIDADES, selected = ORDEM_ESPECIALIDADES,
+                inline = TRUE
+              )
+            ),
+            column(
+              4,
+              selectInput(
+                "componente_oci_comparativos", "Componente",
+                choices = COMPONENTES_OCI_FILTRO, selected = "geral"
+              )
+            )
           ),
           br(),
           h5("Físico por especialidade"),
@@ -1214,12 +1309,6 @@ ui <- page_navbar(
           h5("Produção mensal — 2025 vs 2026"),
           plotlyOutput("grafico_oci_mensal_anos", height = "38vh"),
           barra_downloads("grafico_oci_mensal_anos")
-        ),
-        tabPanel(
-          "Tabela",
-          br(),
-          h5("Status por UF (variação em relação ao mês anterior)"),
-          DTOutput("tabela_status_oci")
         )
       )
     )
@@ -1237,6 +1326,11 @@ server <- function(input, output, session) {
   })
 
   output$data_atualizacao <- renderText({
+    # Não exibe na aba OCI — lá a data de atualização já vem na nota de
+    # fonte específica (info_fonte_dados_oci()).
+    if (isTRUE(input$navbar == "OCI realizadas")) {
+      return("")
+    }
     serie_oci <- dados()$oci_serie
     if (is.null(serie_oci)) {
       return("")
@@ -1586,9 +1680,9 @@ server <- function(input, output, session) {
 
   # Cascata UF -> Município (mesma lógica da aba Cirurgias): só populado
   # quando uma UF específica está selecionada.
-  observeEvent(list(input$uf_oci, dados()$oci_especialidade_municipio), {
+  observeEvent(list(input$uf_oci, dados()$oci_especialidade_componente_municipio), {
 
-    base_mun <- dados()$oci_especialidade_municipio
+    base_mun <- dados()$oci_especialidade_componente_municipio
 
     if (is.null(input$uf_oci) || input$uf_oci == "BRASIL" || is.null(base_mun)) {
       updateSelectInput(session, "municipio_oci", choices = c("Selecione uma UF" = "Todos"), selected = "Todos")
@@ -1618,15 +1712,15 @@ server <- function(input, output, session) {
   })
 
   # Série geral (mesma agregação usada pelo diagrama de monitoramento),
-  # reaproveitada pelo gráfico por especialidade (linha "Geral") e pelo
+  # reaproveitada pelo gráfico por componente (linha "Total geral") e pelo
   # comparativo mensal 2025 x 2026. Quando um município está selecionado,
-  # deriva o "geral" somando as especialidades conhecidas na base de
-  # município (não há export separado de OCI geral por município).
+  # deriva o "geral" somando especialidades e componentes conhecidos na
+  # base de município (não há export separado de OCI geral por município).
   oci_geral_filtrada <- reactive({
 
     if (municipio_oci_ativo()) {
-      base_mun <- dados()$oci_especialidade_municipio
-      validate(need(!is.null(base_mun), "Tabela de OCI por especialidade e município não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
+      base_mun <- dados()$oci_especialidade_componente_municipio
+      validate(need(!is.null(base_mun), "Tabela de OCI por especialidade, componente e município não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
       return(
         base_mun[
           NM_UF == input$uf_oci & MUNICIPIO == input$municipio_oci,
@@ -1652,32 +1746,8 @@ server <- function(input, output, session) {
     }
   })
 
-  # Base de OCI por especialidade já filtrada por UF/região (ou município),
-  # antes do filtro de especialidades marcadas (aplicado individualmente em
-  # cada gráfico, já que "Comparativos" ignora o toggle de especialidade e
-  # usa a série geral para o comparativo mensal).
-  oci_especialidade_filtrada <- reactive({
-
-    if (municipio_oci_ativo()) {
-      base_mun <- dados()$oci_especialidade_municipio
-      validate(need(!is.null(base_mun), "Tabela de OCI por especialidade e município não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
-      return(base_mun[NM_UF == input$uf_oci & MUNICIPIO == input$municipio_oci])
-    }
-
-    base <- dados()$oci_especialidade
-    validate(need(!is.null(base), "Tabela de OCI por especialidade não encontrada. Rode o script Monitoramento_oci_uf_2025_2026.R no projeto OCI."))
-    req(input$uf_oci)
-    validate(need(length(input$regiao_oci) > 0, "Selecione ao menos uma região."))
-
-    if (input$uf_oci == "BRASIL") {
-      base[REGIAO %in% input$regiao_oci]
-    } else {
-      base[NM_UF == input$uf_oci]
-    }
-  })
-
-  # Mesma cascata de UF/região/município de oci_especialidade_filtrada(),
-  # mas a partir do export com quebra por componente/modalidade (Componente
+  # Mesma cascata de UF/região/município usada pelas demais bases de OCI,
+  # a partir do export com quebra por componente/modalidade (Componente
   # Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes). Usada
   # pelo gráfico "Por componente" em "Série histórica OCI" e pela subaba
   # "Série histórica OCI por especialidade".
@@ -1701,18 +1771,9 @@ server <- function(input, output, session) {
     }
   })
 
-  output$grafico_oci <- renderPlotly({
-
-    dados_grafico <- oci_geral_filtrada()
-    validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
-
-    rotulo_uf <- rotulo_local_oci()
-
-    grafico_oci(dados_grafico, titulo = paste0("OCI realizadas — ", rotulo_uf))
-  })
-
-  # "Série histórica OCI" — gráfico "Por componente": uma linha por
-  # componente/modalidade, somando todas as especialidades.
+  # "Série histórica OCI" — "OCI geral": onda de área com o Total geral de
+  # OCI mais uma linha por componente/modalidade, somando todas as
+  # especialidades.
   dados_oci_componente_agregada <- reactive({
 
     agregada <- oci_especialidade_componente_filtrada()[
@@ -1731,7 +1792,27 @@ server <- function(input, output, session) {
 
     grafico_oci_componente(
       dados_geral, dados_oci_componente_agregada(),
-      titulo = paste0("OCI por componente — ", rotulo_local_oci())
+      titulo = paste0("OCI realizadas — ", rotulo_local_oci())
+    )
+  })
+
+  output$grafico_oci_componente_ano <- renderPlotly({
+
+    dados_grafico <- dados_oci_componente_agregada()
+    validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
+
+    grafico_oci_componente_ano(
+      dados_grafico, titulo = paste0("Por ano — ", rotulo_local_oci())
+    )
+  })
+
+  output$grafico_oci_componente_mes <- renderPlotly({
+
+    dados_grafico <- dados_oci_componente_agregada()
+    validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
+
+    grafico_oci_componente_mes(
+      dados_grafico, titulo = paste0("Por mês de atendimento — ", rotulo_local_oci())
     )
   })
 
@@ -1786,6 +1867,49 @@ server <- function(input, output, session) {
     )
   })
 
+  # "OCI por especialidade e componente": sempre quebra pelos 4 componentes
+  # (ignora o filtro de Componente, que aqui não se aplica), só respeita o
+  # filtro de Especialidades.
+  dados_oci_especialidade_componente_agregada <- reactive({
+
+    especialidades_sel <- input$especialidades_oci_sub
+    validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
+
+    oci_especialidade_componente_filtrada()[ESPECIALIDADE %chin% especialidades_sel]
+  })
+
+  output$grafico_oci_especialidade_componente <- renderPlotly({
+
+    dados_grafico <- dados_oci_especialidade_componente_agregada()
+    validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
+
+    grafico_oci_especialidade_componente(
+      dados_grafico,
+      titulo = paste0("OCI por especialidade e componente — ", rotulo_local_oci())
+    )
+  })
+
+  # "Comparativos": aplica o filtro de componente (todos, ou um só) antes de
+  # somar por especialidade/mês — mesmo padrão da subaba "Por especialidade".
+  oci_comparativos_base <- reactive({
+
+    base <- oci_especialidade_componente_filtrada()
+
+    if (isTRUE(input$componente_oci_comparativos != "geral")) {
+      base <- base[COMPONENTE == input$componente_oci_comparativos]
+    }
+
+    base
+  })
+
+  rotulo_componente_oci_comparativos <- reactive({
+    if (isTRUE(input$componente_oci_comparativos == "geral")) {
+      "todos os componentes"
+    } else {
+      input$componente_oci_comparativos
+    }
+  })
+
   # Base física + financeira por especialidade/ano, reaproveitada pelo
   # gráfico físico e pela tabela financeira em "Comparativos".
   oci_especialidade_por_ano <- reactive({
@@ -1793,7 +1917,7 @@ server <- function(input, output, session) {
     especialidades_sel <- input$especialidades_oci_comparativos
     validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
 
-    agregada <- oci_especialidade_filtrada()[
+    agregada <- oci_comparativos_base()[
       ESPECIALIDADE %chin% especialidades_sel,
       .(OCI = sum(OCI, na.rm = TRUE), VALOR = sum(VALOR, na.rm = TRUE)),
       by = .(ANO, ESPECIALIDADE)
@@ -1805,11 +1929,11 @@ server <- function(input, output, session) {
 
   output$grafico_oci_fisico_especialidade <- renderPlotly({
 
-    rotulo_uf <- rotulo_local_oci()
-
     grafico_oci_fisico_especialidade(
       oci_especialidade_por_ano(),
-      titulo = paste0("Físico por especialidade — ", rotulo_uf)
+      titulo = paste0(
+        "Físico por especialidade — ", rotulo_componente_oci_comparativos(), " — ", rotulo_local_oci()
+      )
     )
   })
 
@@ -1832,58 +1956,46 @@ server <- function(input, output, session) {
       formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
   })
 
+  # Ignora o filtro de Especialidades (comparativo mensal usa a série geral
+  # do escopo filtrado), mas respeita o filtro de Componente.
   dados_oci_mensal_anos <- reactive({
 
-    dados_grafico <- oci_geral_filtrada()
+    dados_grafico <- oci_comparativos_base()[
+      , .(oci = sum(OCI, na.rm = TRUE)), by = .(ano = ANO, mes = MES)
+    ]
     validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
 
-    dados_grafico[
-      , .(oci = sum(oci, na.rm = TRUE)),
-      by = .(
-        ano = as.integer(format(competencia, "%Y")),
-        mes = as.integer(format(competencia, "%m"))
-      )
-    ]
+    dados_grafico
   })
 
   output$grafico_oci_mensal_anos <- renderPlotly({
 
     grafico_oci_mensal_anos(
       dados_oci_mensal_anos(),
-      titulo = paste0("Produção mensal — 2025 vs 2026 — ", rotulo_local_oci())
+      titulo = paste0(
+        "Produção mensal — 2025 vs 2026 — ", rotulo_componente_oci_comparativos(), " — ", rotulo_local_oci()
+      )
     )
   })
 
-  output$tabela_status_oci <- renderDT({
-
-    status <- dados()$oci_status
-    validate(need(!is.null(status), ""))
-
-    status <- status[REGIAO %in% input$regiao_oci]
-
-    datatable(
-      status[, .(NM_UF, ultimo, anterior, variacao_ultimo_mes, tendencia, semaforo, nivel)],
-      colnames = c("UF", "Último mês", "Mês anterior", "Variação", "Tendência", "Semáforo", "Nível"),
-      rownames = FALSE,
-      options = list(pageLength = 10, order = list(list(1, "desc")))
-    ) |>
-      formatRound(c("ultimo", "anterior"), digits = 0, mark = ".", interval = 3) |>
-      formatPercentage("variacao_ultimo_mes", 1)
-  })
-
-  ## ---- Exportação de dados (CSV) dos 7 gráficos ----
+  ## ---- Exportação de dados (CSV) dos 8 gráficos ----
   # Cada gráfico expõe os mesmos dados usados para plotar (nenhum recálculo).
 
   output$grafico_cirurgia_csv <- handler_csv(dados_diagrama_cirurgia, "diagrama_monitoramento_cirurgias")
   output$grafico_comparacao_anos_csv <- handler_csv(dados_comparacao_anos, "comparacao_anos_cirurgias")
-  output$grafico_oci_csv <- handler_csv(oci_geral_filtrada, "oci_geral")
 
   dados_oci_componente_export <- reactive({
     dg <- oci_geral_filtrada()[, .(competencia, valor = oci, serie = "Total geral de OCI")]
     ag <- dados_oci_componente_agregada()[, .(competencia, valor = OCI, serie = as.character(COMPONENTE))]
     rbind(dg, ag)
   })
-  output$grafico_oci_componente_csv <- handler_csv(dados_oci_componente_export, "oci_por_componente")
+  output$grafico_oci_componente_csv <- handler_csv(dados_oci_componente_export, "oci_geral")
+
+  dados_oci_componente_ano_export <- reactive({
+    dados_oci_componente_agregada()[, .(OCI = sum(OCI, na.rm = TRUE)), by = .(ANO, COMPONENTE)]
+  })
+  output$grafico_oci_componente_ano_csv <- handler_csv(dados_oci_componente_ano_export, "oci_componente_ano")
+  output$grafico_oci_componente_mes_csv <- handler_csv(dados_oci_componente_agregada, "oci_componente_mes")
 
   dados_oci_especialidade_export <- reactive({
     dg <- dados_oci_especialidade_sub_geral()[, .(competencia, valor = oci, serie = "Geral")]
@@ -1892,6 +2004,15 @@ server <- function(input, output, session) {
   })
   output$grafico_oci_especialidade_csv <- handler_csv(dados_oci_especialidade_export, "oci_por_especialidade")
 
+  dados_oci_especialidade_componente_export <- reactive({
+    dados_oci_especialidade_componente_agregada()[
+      , .(OCI = sum(OCI, na.rm = TRUE)), by = .(ESPECIALIDADE, COMPONENTE)
+    ]
+  })
+  output$grafico_oci_especialidade_componente_csv <- handler_csv(
+    dados_oci_especialidade_componente_export, "oci_especialidade_componente"
+  )
+
   output$grafico_oci_fisico_especialidade_csv <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
   output$grafico_oci_mensal_anos_csv <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
 
@@ -1899,14 +2020,16 @@ server <- function(input, output, session) {
   # (a primeira de cada tabsetPanel). Como elas nunca disparam um evento de
   # troca de aba do Bootstrap, o Shiny não desconsidera a suspensão padrão
   # de outputs escondidos e o link de download nunca é calculado. Aqui isso
-  # é desligado especificamente para esses 7 outputs (não afeta os
+  # é desligado especificamente para esses 9 outputs (não afeta os
   # gráficos/tabelas, que continuam suspensos até a aba ser visitada).
   botoes_download <- c(
     "grafico_cirurgia_csv",
     "grafico_comparacao_anos_csv",
-    "grafico_oci_csv",
     "grafico_oci_componente_csv",
+    "grafico_oci_componente_ano_csv",
+    "grafico_oci_componente_mes_csv",
     "grafico_oci_especialidade_csv",
+    "grafico_oci_especialidade_componente_csv",
     "grafico_oci_fisico_especialidade_csv",
     "grafico_oci_mensal_anos_csv"
   )

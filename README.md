@@ -11,10 +11,9 @@ Painel em **R Shiny** para acompanhar mensalmente a produção de **Cirurgias El
 
 **OCI realizadas**
 - Todas as análises usam mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`, mês em que a OCI foi efetivamente realizada), não mês de processamento;
-- Aba "Série histórica OCI": série mensal geral, com marcação da virada de ano de referência, e um gráfico "Por componente" logo abaixo — uma linha por componente/modalidade (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes) mais o Total geral, cada uma podendo ser ligada/desligada clicando na legenda;
-- Aba "Série histórica OCI por especialidade": mesmo gráfico "Geral + por especialidade" de antes, mas isolado numa subaba própria, com filtro de Especialidade e um filtro de Componente (OCI geral ou um componente específico) que só existem ali;
-- Aba "Comparativos": Físico/Financeiro por especialidade (com seu próprio filtro de Especialidade, independente do da subaba anterior) e produção mensal 2025 vs 2026;
-- Aba "Tabela": status por UF (variação em relação ao mês anterior, tendência, semáforo, nível);
+- Aba "Série histórica OCI": um único gráfico "OCI geral" — onda de área com o Total geral de OCI e marcação da virada de ano de referência, com uma linha sobreposta por componente/modalidade (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes), cada uma podendo ser ligada/desligada clicando na legenda — e, logo abaixo, dois gráficos empilhados por componente (mesmas cores do gráfico de referência do projeto OCI): "Por ano" (2025 vs 2026, barras horizontais) e, em seguida, "Por mês de atendimento" (colunas verticais);
+- Aba "Série histórica OCI por especialidade": mesmo gráfico "Geral + por especialidade" de antes, mas isolado numa subaba própria, com filtro de Especialidade e um filtro de Componente (OCI geral ou um componente específico) que só existem ali; logo abaixo, um gráfico de colunas empilhadas "Por especialidade e componente" — total do período por especialidade (ordenado do maior para o menor), sempre quebrado pelos 4 componentes independente do filtro de Componente;
+- Aba "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com seu próprio filtro de Especialidade (independente do da subaba anterior) e um filtro de Componente igual ao da subaba anterior — o comparativo mensal ignora o filtro de Especialidade, mas respeita o de Componente;
 - Mesma lógica de filtro por região/UF/município e agregado dinâmico do painel de cirurgias.
 
 ## Fonte dos dados
@@ -38,8 +37,6 @@ Cirurgia/resultados/bases_processadas/
     cirurgias_mensal_procedimento_rol_*.csv
 OCI/resultados/
     planilha_OCI_UF_mes_*.xlsx
-    tabela_status_OCI_planilhao_*.csv
-    oci_mensal_especialidade_{uf,municipio}.csv
     oci_mensal_especialidade_componente_{uf,municipio}.csv
                           │
                           ▼   sincronizado ao abrir o app ou clicar em "Atualizar dados"
