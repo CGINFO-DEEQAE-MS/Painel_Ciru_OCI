@@ -10,10 +10,12 @@ Painel em **R Shiny** para acompanhar mensalmente a produção de **Cirurgias El
 - Abas "Comparação Anos", "Diagrama de monitoramento" e "Tabela" (classificação do último mês por UF, sempre Físico, independente do toggle).
 
 **OCI realizadas**
-- Série mensal de produção, geral e por especialidade, com marcação da virada de ano de referência;
-- Comparativos Físico/Financeiro por especialidade e produção mensal 2025 vs 2026;
-- Tabela de status por UF (variação em relação ao mês anterior, tendência, semáforo, nível);
-- Mesma lógica de filtro por região/UF e agregado dinâmico do painel de cirurgias.
+- Todas as análises usam mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`, mês em que a OCI foi efetivamente realizada), não mês de processamento;
+- Aba "Série histórica OCI": série mensal geral, com marcação da virada de ano de referência, e um gráfico "Por componente" logo abaixo — uma linha por componente/modalidade (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes) mais o Total geral, cada uma podendo ser ligada/desligada clicando na legenda;
+- Aba "Série histórica OCI por especialidade": mesmo gráfico "Geral + por especialidade" de antes, mas isolado numa subaba própria, com filtro de Especialidade e um filtro de Componente (OCI geral ou um componente específico) que só existem ali;
+- Aba "Comparativos": Físico/Financeiro por especialidade (com seu próprio filtro de Especialidade, independente do da subaba anterior) e produção mensal 2025 vs 2026;
+- Aba "Tabela": status por UF (variação em relação ao mês anterior, tendência, semáforo, nível);
+- Mesma lógica de filtro por região/UF/município e agregado dinâmico do painel de cirurgias.
 
 ## Fonte dos dados
 
@@ -38,6 +40,7 @@ OCI/resultados/
     planilha_OCI_UF_mes_*.xlsx
     tabela_status_OCI_planilhao_*.csv
     oci_mensal_especialidade_{uf,municipio}.csv
+    oci_mensal_especialidade_componente_{uf,municipio}.csv
                           │
                           ▼   sincronizado ao abrir o app ou clicar em "Atualizar dados"
               Painel_Ciru_OCI/dados/processados/
