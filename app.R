@@ -48,7 +48,8 @@ DATA_VIRADA_OCI <- as.Date("2026-01-01")
 ROTULOS_INDICADOR_CIRURGIA <- c(
   rol   = "Cirurgias Eletivas (MAC e FAEC) do ROL",
   total = "Cirurgias Eletivas (MAC e FAEC) totais",
-  pnrf  = "Cirurgias Eletivas do Programa (PNRF)"
+  pnrf  = "Cirurgias Eletivas do Programa (PNRF)",
+  pab   = "Cirurgias Eletivas PAB"
 )
 
 ORDEM_ESPECIALIDADES <- c(
@@ -99,6 +100,11 @@ COMPONENTES_OCI_FILTRO <- c(
   "Créditos Financeiros"    = "Créditos Financeiros",
   "Equipes Volantes"        = "Equipes Volantes"
 )
+
+# Anos com dados no export atual do projeto OCI (mesmo escopo do script
+# Monitoramento_oci_uf_2025_2026.R) — filtro exclusivo do gráfico "OCI por
+# especialidade e componente".
+ANOS_OCI <- c(2025, 2026)
 
 cores_para_anos <- function(anos) {
   anos <- sort(unique(anos))
@@ -331,7 +337,7 @@ sincronizar_dados_locais <- function() {
   }
 
   origem_cirurgia <- file.path(
-    CIRURGIA_DIR_ORIGEM, "resultados", "tabelas", "monitoramento_diagrama_controle"
+    CIRURGIA_DIR_ORIGEM, "resultados", "02_monitoramento", "tabelas"
   )
   origem_cirurgia_bases <- file.path(
     CIRURGIA_DIR_ORIGEM, "resultados", "bases_processadas"
@@ -348,9 +354,11 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_anos_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_total_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_pnrf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_pab_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_rol_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_total_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pnrf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pab_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia_bases, "^cirurgias_mensal_procedimento_rol_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
@@ -375,9 +383,11 @@ carregar_tudo <- function() {
     cirurgia_anos_rol = carregar_serie_anos_cirurgia("rol"),
     cirurgia_anos_total = carregar_serie_anos_cirurgia("total"),
     cirurgia_anos_pnrf = carregar_serie_anos_cirurgia("pnrf"),
+    cirurgia_anos_pab = carregar_serie_anos_cirurgia("pab"),
     cirurgia_municipio_rol = carregar_serie_municipio_cirurgia("rol"),
     cirurgia_municipio_total = carregar_serie_municipio_cirurgia("total"),
     cirurgia_municipio_pnrf = carregar_serie_municipio_cirurgia("pnrf"),
+    cirurgia_municipio_pab = carregar_serie_municipio_cirurgia("pab"),
     cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
     mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
     oci_serie = carregar_serie_oci(),
@@ -1119,7 +1129,6 @@ ui <- page_navbar(
     )),
     div(
       style = "padding: 6px 16px;",
-      actionButton("atualizar", "Atualizar dados", icon = icon("rotate")),
       textOutput("data_atualizacao", inline = TRUE)
     )
   ),
@@ -1137,6 +1146,13 @@ ui <- page_navbar(
             "Ciru. PATE (PNRF)" = "pnrf"
           ),
           selected = "rol"
+        ),
+        checkboxInput(
+          "pab_cirurgia", "Cirurgias Eletivas PAB", value = FALSE
+        ),
+        div(
+          class = "text-muted small mb-2", style = "line-height: 1.3;",
+          "PAB vale só para \"Comparação Anos\" (sem valor financeiro) — substitui o indicador acima enquanto marcado."
         ),
         fluidRow(
           column(
@@ -1275,6 +1291,10 @@ ui <- page_navbar(
           barra_downloads("grafico_oci_especialidade"),
           br(),
           h5("OCI por especialidade e componente"),
+          checkboxGroupInput(
+            "anos_oci_especialidade_componente", "Ano",
+            choices = ANOS_OCI, selected = ANOS_OCI, inline = TRUE
+          ),
           plotlyOutput("grafico_oci_especialidade_componente", height = "50vh"),
           barra_downloads("grafico_oci_especialidade_componente")
         ),
@@ -1321,10 +1341,6 @@ server <- function(input, output, session) {
 
   dados <- reactiveVal(carregar_tudo())
 
-  observeEvent(input$atualizar, {
-    dados(carregar_tudo())
-  })
-
   output$data_atualizacao <- renderText({
     # Não exibe na aba OCI — lá a data de atualização já vem na nota de
     # fonte específica (info_fonte_dados_oci()).
@@ -1335,7 +1351,7 @@ server <- function(input, output, session) {
     if (is.null(serie_oci)) {
       return("")
     }
-    paste0(" | Dados até a competência ", format(max(serie_oci$competencia, na.rm = TRUE), "%m/%Y"))
+    paste0("Dados até a competência ", format(max(serie_oci$competencia, na.rm = TRUE), "%m/%Y"))
   })
 
   ## ---- Cirurgias ----
@@ -1436,14 +1452,22 @@ server <- function(input, output, session) {
     )
   })
 
+  # Indicador efetivo de "Comparação Anos": PAB (checkbox) substitui o
+  # indicador do dropdown só aqui — Diagrama de monitoramento e Tabela
+  # continuam sempre com input$indicador_cirurgia, sem PAB (não tem
+  # diagrama de controle nem tabela de status calculados).
+  indicador_comparacao_anos <- reactive({
+    if (isTRUE(input$pab_cirurgia)) "pab" else input$indicador_cirurgia
+  })
+
   serie_anos_cirurgia_indicador <- reactive({
-    req(input$indicador_cirurgia)
-    dados()[[paste0("cirurgia_anos_", input$indicador_cirurgia)]]
+    req(indicador_comparacao_anos())
+    dados()[[paste0("cirurgia_anos_", indicador_comparacao_anos())]]
   })
 
   serie_municipio_cirurgia_indicador <- reactive({
-    req(input$indicador_cirurgia)
-    dados()[[paste0("cirurgia_municipio_", input$indicador_cirurgia)]]
+    req(indicador_comparacao_anos())
+    dados()[[paste0("cirurgia_municipio_", indicador_comparacao_anos())]]
   })
 
   # Cascata UF -> Município: só populado quando uma UF específica está
@@ -1511,6 +1535,8 @@ server <- function(input, output, session) {
     req(input$indicador_cirurgia, input$uf_cirurgia)
     validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
 
+    indicador_sel <- indicador_comparacao_anos()
+
     especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
     procedimentos_sel <- input$procedimento_cirurgia
     filtro_procedimento_ativo <- especialidade_sel != "Todas" || length(procedimentos_sel) > 0
@@ -1518,8 +1544,8 @@ server <- function(input, output, session) {
     if (filtro_procedimento_ativo) {
 
       validate(need(
-        input$indicador_cirurgia == "rol",
-        "Filtros de Especialidade/Procedimento valem só para o indicador ROL. Selecione ROL, ou volte a Especialidade/Procedimento para \"Todas\"/\"Todos\"."
+        indicador_sel == "rol",
+        "Filtros de Especialidade/Procedimento valem só para o indicador ROL. Selecione ROL (e desmarque PAB), ou volte a Especialidade/Procedimento para \"Todas\"/\"Todos\"."
       ))
       validate(need(
         input$metrica_cirurgia_anos == "fisico",
@@ -1542,6 +1568,11 @@ server <- function(input, output, session) {
       )
 
     } else {
+
+      validate(need(
+        indicador_sel != "pab" || input$metrica_cirurgia_anos == "fisico",
+        "Não há valor financeiro para Cirurgias Eletivas PAB — selecione \"Físico\"."
+      ))
 
       serie <- serie_anos_cirurgia_indicador()
       validate(need(!is.null(serie), "Série multianual não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
@@ -1616,7 +1647,7 @@ server <- function(input, output, session) {
     dados_uf <- dados_comparacao_anos()
     req(input$metrica_cirurgia_anos)
 
-    rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]]
+    rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[indicador_comparacao_anos()]]
 
     grafico_comparacao_anos(
       dados_uf,
@@ -1868,14 +1899,19 @@ server <- function(input, output, session) {
   })
 
   # "OCI por especialidade e componente": sempre quebra pelos 4 componentes
-  # (ignora o filtro de Componente, que aqui não se aplica), só respeita o
-  # filtro de Especialidades.
+  # (ignora o filtro de Componente, que aqui não se aplica), respeita o
+  # filtro de Especialidades e tem filtro de Ano próprio (só deste gráfico).
   dados_oci_especialidade_componente_agregada <- reactive({
 
     especialidades_sel <- input$especialidades_oci_sub
     validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
 
-    oci_especialidade_componente_filtrada()[ESPECIALIDADE %chin% especialidades_sel]
+    anos_sel <- input$anos_oci_especialidade_componente
+    validate(need(length(anos_sel) > 0, "Selecione ao menos um ano."))
+
+    oci_especialidade_componente_filtrada()[
+      ESPECIALIDADE %chin% especialidades_sel & ANO %in% as.integer(anos_sel)
+    ]
   })
 
   output$grafico_oci_especialidade_componente <- renderPlotly({
@@ -1883,9 +1919,11 @@ server <- function(input, output, session) {
     dados_grafico <- dados_oci_especialidade_componente_agregada()
     validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
 
+    rotulo_anos <- paste(sort(input$anos_oci_especialidade_componente), collapse = " e ")
+
     grafico_oci_especialidade_componente(
       dados_grafico,
-      titulo = paste0("OCI por especialidade e componente — ", rotulo_local_oci())
+      titulo = paste0("OCI por especialidade e componente — ", rotulo_anos, " — ", rotulo_local_oci())
     )
   })
 

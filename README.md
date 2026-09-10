@@ -7,6 +7,7 @@ Painel em **R Shiny** para acompanhar mensalmente a produção de **Cirurgias El
 **Cirurgias eletivas**
 - Diagrama de controle: faixa histórica (min-máx e Q1-Q3), mediana, produção do ano de comparação e do ano monitorado, com classificação mensal em 5 níveis (Esperado, Acima do esperado, Acima do limite esperado, Atenção, Crítico abaixo do limite esperado) — disponível para ROL e Total (Físico e Financeiro) e, dentro do ROL, também por Especialidade. PNRF não tem diagrama (histórico ainda curto demais para faixas confiáveis); o modo Financeiro não mostra classificação por cor (só a linha de produção).
 - Filtros: indicador (MAC e FAEC totais / do Rol / Ciru. PATE-PNRF), Região (múltipla escolha em dropdown) e UF lado a lado, Município (só "Comparação Anos"), e — só para o indicador ROL — Especialidade e Procedimento, cruzando com `dados/Relacao_cirugiasROL.xlsx`. Especialidade vale para "Comparação Anos" e "Diagrama de monitoramento"; Procedimento (multisseleção, soma os selecionados) só para "Comparação Anos".
+- Checkbox "Cirurgias Eletivas PAB", abaixo do indicador: quando marcado, substitui o indicador do dropdown **só em "Comparação Anos"** (Diagrama de monitoramento e Tabela continuam sempre no indicador do dropdown, sem PAB — não há diagrama de controle nem tabela de status para PAB). PAB não tem valor financeiro nas extrações atuais (só MAC/FAEC têm); o toggle Financeiro fica bloqueado com aviso quando PAB está marcado.
 - Abas "Comparação Anos", "Diagrama de monitoramento" e "Tabela" (classificação do último mês por UF, sempre Físico, independente do toggle).
 
 **OCI realizadas**
@@ -28,11 +29,11 @@ Este painel **não acessa o SUS360 diretamente**. Ele consome os arquivos já pr
 ## Como os dados chegam ao painel
 
 ```
-Cirurgia/resultados/tabelas/monitoramento_diagrama_controle/
+Cirurgia/resultados/02_monitoramento/tabelas/
     serie_completa_{rol,total,pnrf}_*.csv
     serie_completa_financeiro_{rol,total,pnrf}_*.csv
-    serie_anos_{rol,total,pnrf}_*.csv
-    serie_anos_municipio_{rol,total,pnrf}_*.csv
+    serie_anos_{rol,total,pnrf,pab}_*.csv
+    serie_anos_municipio_{rol,total,pnrf,pab}_*.csv
 Cirurgia/resultados/bases_processadas/
     cirurgias_mensal_procedimento_rol_*.csv
 OCI/resultados/

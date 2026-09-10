@@ -68,3 +68,6 @@ __pycache__/
 
 # Arquivos de backup
 *.Rproj.user
+.claude/launch.json
+.claude/launch.json
+/.claude
