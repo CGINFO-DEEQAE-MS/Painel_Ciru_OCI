@@ -1,6 +1,6 @@
-# Painel para monitoramento da produção de Cirurgias Eletivas e OCI
+# Painel para monitoramento da produção física e financeira ATE
 
-Painel em **R Shiny** para acompanhar mensalmente a produção de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF) e de **Ofertas de Cuidados Integrados (OCI)**, comparando com parâmetros históricos e classificando o desempenho por UF. Cada indicador de cirurgias tem visão Físico e Financeiro (R$).
+Painel em **R Shiny** para acompanhar mensalmente a produção física e financeira de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF), das **Ofertas de Cuidados Integrados (OCI)** e do **Pagamento Portaria 9810**
 
 ## Funcionalidades
 
