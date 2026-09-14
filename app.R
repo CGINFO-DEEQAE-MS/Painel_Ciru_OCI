@@ -260,20 +260,20 @@ carregar_mapa_especialidade_rol <- function() {
 # bruto traz outras portarias misturadas, então só entram linhas com
 # NU_PORTARIA 09810/9810. Data de pagamento = ANO + MÊS (coluna de texto,
 # ex. "set").
-# Resume os valores da coluna PROGRAMA (nomes longos e técnicos) nos 4
-# rótulos usados como filtro de Componente no painel. "MUTIRÃO" (MAC) entra
-# junto com "Componente Cirúrgico" — mesma frente MAC de cirurgia, só que
-# via força-tarefa.
+# Resume os valores da coluna PROGRAMA (nomes longos e técnicos) nos 5
+# rótulos usados como filtro de Componente no painel. FAEC - PMAE e FAEC
+# PNRF levam "*" porque são Despesa de Exercício Anterior (ver nota na
+# sidebar da aba).
 mapear_programa_portaria9810 <- function(programa) {
 
   programa_norm <- stri_trans_general(toupper(trimws(programa)), "Latin-ASCII")
 
   fcase(
     stri_detect_fixed(programa_norm, "COMPONENTE AMBULATORIAL"), "Componente Ambulatorial",
-    stri_detect_fixed(programa_norm, "COMPONENTE CIRURGICO") | stri_detect_fixed(programa_norm, "MUTIRAO"),
-    "Componente Cirúrgico",
-    stri_detect_fixed(programa_norm, "PMAE"), "FAEC - PMAE",
-    stri_detect_fixed(programa_norm, "REDUCAO DAS FILAS"), "FAEC PNRF",
+    stri_detect_fixed(programa_norm, "COMPONENTE CIRURGICO"), "Componente Cirúrgico",
+    stri_detect_fixed(programa_norm, "MUTIRAO"), "Mutirão",
+    stri_detect_fixed(programa_norm, "PMAE"), "FAEC - PMAE*",
+    stri_detect_fixed(programa_norm, "REDUCAO DAS FILAS"), "FAEC PNRF*",
     default = programa_norm
   )
 }
@@ -661,6 +661,51 @@ alta_resolucao <- function(p, nome_arquivo = "grafico") {
   )
 }
 
+# Retângulo cinza cobrindo os últimos 3 meses de uma série mensal (datas no
+# 1º dia do mês), para sinalizar visualmente que os meses mais recentes de
+# OCI ainda são dados preliminares (defasagem de fechamento da base). Some
+# de vez se a série tiver menos de 1 mês.
+sombra_dados_preliminares <- function(datas_unicas) {
+
+  datas_unicas <- sort(unique(datas_unicas))
+  n <- length(datas_unicas)
+
+  if (n < 1) {
+    return(NULL)
+  }
+
+  idx_inicio <- max(1, n - 2)
+  x0 <- datas_unicas[idx_inicio]
+  x1 <- seq(datas_unicas[n], by = "1 month", length.out = 2)[2]
+
+  list(
+    type = "rect", xref = "x", yref = "paper",
+    x0 = x0, x1 = x1, y0 = 0, y1 = 1,
+    fillcolor = "rgba(128,128,128,0.18)",
+    line = list(width = 0),
+    layer = "below"
+  )
+}
+
+# Rótulo "Dados preliminares", centralizado na sombra acima, perto do topo
+# do gráfico — sem isso, o retângulo cinza sozinho não deixa claro o motivo.
+anotacao_dados_preliminares <- function(datas_unicas) {
+
+  sombra <- sombra_dados_preliminares(datas_unicas)
+
+  if (is.null(sombra)) {
+    return(NULL)
+  }
+
+  list(
+    x = mean(c(sombra$x0, sombra$x1)), y = 0.97,
+    xref = "x", yref = "paper",
+    text = "Dados preliminares", showarrow = FALSE,
+    font = list(size = 11, color = "#666666"),
+    xanchor = "center"
+  )
+}
+
 # Dados brutos por trás de qualquer gráfico, em CSV (";" + decimal ",",
 # mesmo padrão dos demais arquivos do painel).
 handler_csv <- function(dados_fn, nome_arquivo) {
@@ -882,10 +927,14 @@ grafico_oci_componente <- function(dados_geral, dados_componente, titulo) {
         tickangle = -45
       ),
       yaxis = list(title = "OCI realizadas", tickformat = ",.0f", rangemode = "tozero"),
-      shapes = list(list(
-        type = "line", x0 = DATA_VIRADA_OCI, x1 = DATA_VIRADA_OCI, y0 = 0, y1 = 1, yref = "paper",
-        line = list(color = "#D85A30", dash = "dash", width = 1.2)
-      )),
+      shapes = list(
+        sombra_dados_preliminares(datas_unicas),
+        list(
+          type = "line", x0 = DATA_VIRADA_OCI, x1 = DATA_VIRADA_OCI, y0 = 0, y1 = 1, yref = "paper",
+          line = list(color = "#D85A30", dash = "dash", width = 1.2)
+        )
+      ),
+      annotations = list(anotacao_dados_preliminares(datas_unicas)),
       hovermode = "x unified",
       legend = list(orientation = "h", y = -0.3),
       margin = list(b = 110),
@@ -980,6 +1029,8 @@ grafico_oci_componente_mes <- function(dados, titulo) {
         tickangle = -45
       ),
       yaxis = list(title = "OCI realizadas", tickformat = ",.0f"),
+      shapes = list(sombra_dados_preliminares(datas_unicas)),
+      annotations = list(anotacao_dados_preliminares(datas_unicas)),
       legend = list(orientation = "h", y = -0.35),
       margin = list(b = 110),
       separators = ",."
@@ -1031,6 +1082,8 @@ grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) 
         tickangle = -45
       ),
       yaxis = list(title = "OCI realizadas", tickformat = ",.0f", rangemode = "tozero"),
+      shapes = list(sombra_dados_preliminares(datas_unicas)),
+      annotations = list(anotacao_dados_preliminares(datas_unicas)),
       hovermode = "x unified",
       legend = list(orientation = "h", y = -0.3),
       margin = list(b = 110),
@@ -1190,8 +1243,9 @@ grafico_portaria9810_mensal <- function(dados, titulo) {
 CORES_PROGRAMA_PORTARIA9810 <- c(
   "Componente Ambulatorial" = "#185FA5",
   "Componente Cirúrgico"    = "#D85A30",
-  "FAEC - PMAE"             = "#2e8b57",
-  "FAEC PNRF"               = "#a4508b"
+  "Mutirão"                 = "#c9a227",
+  "FAEC - PMAE*"            = "#2e8b57",
+  "FAEC PNRF*"              = "#a4508b"
 )
 
 # Uma linha por Componente (categoria resumida da coluna PROGRAMA — ver
@@ -1578,7 +1632,9 @@ ui <- page_navbar(
         ),
         div(
           class = "text-muted small mt-2", style = "line-height: 1.3;",
-          "Considera somente pagamentos da Portaria nº 9.810 (Valor Líquido)."
+          "Considera somente pagamentos da Portaria nº 9.810 (Valor Líquido).",
+          br(), br(),
+          "* Despesa de Exercício Anterior."
         )
       ),
       tabsetPanel(
@@ -2420,13 +2476,15 @@ server <- function(input, output, session) {
       agregada, NM_UF ~ TIPO_GESTAO,
       value.var = "valor", fun.aggregate = sum, fill = 0
     )
-    colunas_valor <- setdiff(names(tabela), "NM_UF")
+    colunas_tipo <- setdiff(names(tabela), "NM_UF")
+    tabela[, Total := rowSums(.SD), .SDcols = colunas_tipo]
+    colunas_valor <- c(colunas_tipo, "Total")
 
     datatable(
       tabela,
-      colnames = c("UF", stri_trans_totitle(colunas_valor)),
+      colnames = c("UF", stri_trans_totitle(colunas_tipo), "Total"),
       rownames = FALSE,
-      options = list(pageLength = 10, order = list(list(1, "desc")))
+      options = list(pageLength = 10, order = list(list(length(colunas_valor), "desc")))
     ) |>
       formatCurrency(colunas_valor, currency = "R$ ", interval = 3, mark = ".", digits = 0)
   })

@@ -12,6 +12,7 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 
 **OCI realizadas**
 - Todas as análises usam mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`, mês em que a OCI foi efetivamente realizada), não mês de processamento;
+- Os gráficos com série mensal por mês de atendimento ("OCI geral", "Por mês de atendimento" e "OCI por especialidade") destacam os últimos 3 meses com uma faixa cinza e o rótulo "Dados preliminares" — a base ainda não fechou totalmente essas competências (ver `sombra_dados_preliminares()`/`anotacao_dados_preliminares()` em `app.R`);
 - Aba "Série histórica OCI": um único gráfico "OCI geral" — onda de área com o Total geral de OCI e marcação da virada de ano de referência, com uma linha sobreposta por componente/modalidade (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes), cada uma podendo ser ligada/desligada clicando na legenda — e, logo abaixo, dois gráficos empilhados por componente (mesmas cores do gráfico de referência do projeto OCI): "Por ano" (2025 vs 2026, barras horizontais) e, em seguida, "Por mês de atendimento" (colunas verticais);
 - Aba "Série histórica OCI por especialidade": mesmo gráfico "Geral + por especialidade" de antes, mas isolado numa subaba própria, com filtro de Especialidade e um filtro de Componente (OCI geral ou um componente específico) que só existem ali; logo abaixo, um gráfico de colunas empilhadas "Por especialidade e componente" — total do período por especialidade (ordenado do maior para o menor), sempre quebrado pelos 4 componentes independente do filtro de Componente;
 - Aba "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com seu próprio filtro de Especialidade (independente do da subaba anterior) e um filtro de Componente igual ao da subaba anterior — o comparativo mensal ignora o filtro de Especialidade, mas respeita o de Componente;
@@ -19,9 +20,9 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 
 **Pagamento Portaria 9810**
 - Acompanha os repasses da Portaria GM/MS nº 9.810/2025 (Programa Agora Tem Especialistas — Componentes Ambulatorial e Cirúrgico). Regra fixa da aba: só entram linhas com `NU_PORTARIA` 09810/9810 (a base bruta traz outras portarias misturadas) e só o Valor Líquido.
-- Filtros: UF, Município (cascata a partir da UF), Tipo de Gestão (Estadual/Municipal) e Componente. O filtro de Componente vem da coluna `PROGRAMA` da base, resumida em 4 rótulos: "Componente Ambulatorial", "Componente Cirúrgico" (inclui também os registros de "Mutirão"), "FAEC - PMAE" e "FAEC PNRF" (ver `mapear_programa_portaria9810()` em `app.R`).
+- Filtros: UF, Município (cascata a partir da UF), Tipo de Gestão (Estadual/Municipal) e Componente. O filtro de Componente vem da coluna `PROGRAMA` da base, resumida em 5 rótulos: "Componente Ambulatorial", "Componente Cirúrgico", "Mutirão", "FAEC - PMAE*" e "FAEC PNRF*" (ver `mapear_programa_portaria9810()` em `app.R`) — os dois com "*" são Despesa de Exercício Anterior (nota na sidebar da aba).
 - Todas as análises usam mês de **pagamento** (ANO + MÊS da base), não mês de competência.
-- Aba "Pagamentos": total por mês de pagamento empilhado por Tipo de Gestão; gráfico de linhas por mês de pagamento com uma linha por Componente; tabela de detalhamento por UF e Tipo de Gestão.
+- Aba "Pagamentos": total por mês de pagamento empilhado por Tipo de Gestão; gráfico de linhas por mês de pagamento com uma linha por Componente; tabela de detalhamento por UF com colunas Estadual, Municipal e Total.
 - Aba "Limite da Portaria 9810": valor pago x limite de repasse por UF (`dados/PORTARIA_9.810_UF.xlsx`), sempre por UF inteira (soma Estadual + Municipal, todos os municípios — os filtros de Município e Tipo de Gestão não se aplicam aqui), com destaque visual para UFs que já ultrapassaram o limite.
 
 ## Fonte dos dados
