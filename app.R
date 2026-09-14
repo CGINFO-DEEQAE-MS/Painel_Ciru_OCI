@@ -1625,8 +1625,9 @@ server <- function(input, output, session) {
 
   output$data_atualizacao <- renderText({
     # Não exibe na aba OCI — lá a data de atualização já vem na nota de
-    # fonte específica (info_fonte_dados_oci()).
-    if (isTRUE(input$navbar == "OCI realizadas")) {
+    # fonte específica (info_fonte_dados_oci()). Também não exibe na aba da
+    # Portaria 9810 — data de atualização não se aplica a essa base.
+    if (isTRUE(input$navbar %in% c("OCI realizadas", "Pagamento Portaria 9810"))) {
       return("")
     }
     serie_oci <- dados()$oci_serie
