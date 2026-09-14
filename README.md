@@ -17,6 +17,13 @@ Painel em **R Shiny** para acompanhar mensalmente a produção de **Cirurgias El
 - Aba "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com seu próprio filtro de Especialidade (independente do da subaba anterior) e um filtro de Componente igual ao da subaba anterior — o comparativo mensal ignora o filtro de Especialidade, mas respeita o de Componente;
 - Mesma lógica de filtro por região/UF/município e agregado dinâmico do painel de cirurgias.
 
+**Pagamento Portaria 9810**
+- Acompanha os repasses da Portaria GM/MS nº 9.810/2025 (Programa Agora Tem Especialistas — Componentes Ambulatorial e Cirúrgico). Regra fixa da aba: só entram linhas com `NU_PORTARIA` 09810/9810 (a base bruta traz outras portarias misturadas) e só o Valor Líquido.
+- Filtros: UF, Município (cascata a partir da UF), Tipo de Gestão (Estadual/Municipal) e Componente. O filtro de Componente vem da coluna `PROGRAMA` da base, resumida em 4 rótulos: "Componente Ambulatorial", "Componente Cirúrgico" (inclui também os registros de "Mutirão"), "FAEC - PMAE" e "FAEC PNRF" (ver `mapear_programa_portaria9810()` em `app.R`).
+- Todas as análises usam mês de **pagamento** (ANO + MÊS da base), não mês de competência.
+- Aba "Pagamentos": total por mês de pagamento empilhado por Tipo de Gestão; gráfico de linhas por mês de pagamento com uma linha por Componente; tabela de detalhamento por UF e Tipo de Gestão.
+- Aba "Limite da Portaria 9810": valor pago x limite de repasse por UF (`dados/PORTARIA_9.810_UF.xlsx`), sempre por UF inteira (soma Estadual + Municipal, todos os municípios — os filtros de Município e Tipo de Gestão não se aplicam aqui), com destaque visual para UFs que já ultrapassaram o limite.
+
 ## Fonte dos dados
 
 Os dados têm origem pública, disponibilizados pelo Ministério da Saúde na plataforma **SUS360**:
@@ -24,7 +31,7 @@ Os dados têm origem pública, disponibilizados pelo Ministério da Saúde na pl
 - [Componente Ambulatorial (OCI)](https://sus360.saude.gov.br/#painel/componente-ambulatorial)
 - [Cirurgias Eletivas](https://sus360.saude.gov.br/painel/cirurgias/)
 
-Este painel **não acessa o SUS360 diretamente**. Ele consome os arquivos já processados e padronizados pelos projetos irmãos `Cirurgia` e `OCI`, que fazem esse tratamento a partir das bases brutas — com uma exceção: `dados/Relacao_cirugiasROL.xlsx` (mapeamento Código SIGTAP → Especialidade, usado nos filtros de Especialidade/Procedimento) é mantido manualmente dentro deste projeto, não vem do SUS360 nem é gerado por script.
+Este painel **não acessa o SUS360 diretamente**. Ele consome os arquivos já processados e padronizados pelos projetos irmãos `Cirurgia` e `OCI`, que fazem esse tratamento a partir das bases brutas — com três exceções mantidas manualmente dentro deste projeto (não vêm do SUS360 nem são geradas por script): `dados/Relacao_cirugiasROL.xlsx` (mapeamento Código SIGTAP → Especialidade, usado nos filtros de Especialidade/Procedimento), `dados/BaseValorliquidoPortaria9810.xlsx` (base de pagamentos da Portaria 9.810) e `dados/PORTARIA_9.810_UF.xlsx` (limite de repasse por UF da mesma portaria).
 
 ## Como os dados chegam ao painel
 
@@ -40,10 +47,12 @@ OCI/resultados/
     planilha_OCI_UF_mes_*.xlsx
     oci_mensal_especialidade_componente_{uf,municipio}.csv
                           │
-                          ▼   sincronizado ao abrir o app ou clicar em "Atualizar dados"
+                          ▼   sincronizado toda vez que o app abre (sessão nova)
               Painel_Ciru_OCI/dados/processados/
 
-Painel_Ciru_OCI/dados/Relacao_cirugiasROL.xlsx   ← mantido manualmente, não sincroniza sozinho
+Painel_Ciru_OCI/dados/Relacao_cirugiasROL.xlsx           ← mantido manualmente, não sincroniza sozinho
+Painel_Ciru_OCI/dados/BaseValorliquidoPortaria9810.xlsx  ← mantido manualmente, não sincroniza sozinho
+Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente, não sincroniza sozinho
 ```
 
 `dados/processados/` é a principal fonte que o `app.R` lê (mais o `Relacao_cirugiasROL.xlsx` acima, que fica direto em `dados/`). A pasta `processados/` é ignorada pelo Git (não vai para o GitHub) e existe em dois estados:
@@ -60,8 +69,10 @@ Painel_Ciru_OCI/dados/Relacao_cirugiasROL.xlsx   ← mantido manualmente, não s
 └── Painel_Ciru_OCI/
     ├── app.R
     ├── dados/
-    │   ├── Relacao_cirugiasROL.xlsx   # mantido manualmente, não ignorado pelo Git
-    │   └── processados/               # gerado automaticamente, ignorado pelo Git
+    │   ├── Relacao_cirugiasROL.xlsx           # mantido manualmente, não ignorado pelo Git
+    │   ├── BaseValorliquidoPortaria9810.xlsx  # mantido manualmente, não ignorado pelo Git
+    │   ├── PORTARIA_9.810_UF.xlsx             # mantido manualmente, não ignorado pelo Git
+    │   └── processados/                       # gerado automaticamente, ignorado pelo Git
     ├── README.md
     ├── .gitignore
     └── .gitattributes
@@ -84,7 +95,7 @@ Depende do pacote `shinyWidgets` (dropdown de Região com múltipla escolha), al
 1. Rode os scripts de tratamento em `Cirurgia` e `OCI` para atualizar a competência mais recente;
 2. Abra e rode este app localmente uma vez, para sincronizar `dados/processados/`;
 3. No RStudio, com `app.R` aberto, clique em **Publish**. Se for a primeira vez numa conta nova (sem deploy anterior), use a seta ao lado do botão Publish → **Other Destination** para poder escolher a conta antes de criar o app — clicar direto no botão tende a reaproveitar a última conta/app usados;
-4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados para envio, mais o `dados/Relacao_cirugiasROL.xlsx` (ele não é gerado automaticamente, então só vai junto se for marcado manualmente) — e nenhum `.RData`, se aparecer.
+4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados para envio, mais `dados/Relacao_cirugiasROL.xlsx`, `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (nenhum desses três é gerado automaticamente, então só vão junto se forem marcados manualmente) — e nenhum `.RData`, se aparecer.
 
 Publicado em [`https://cginfo.shinyapps.io/Painel_Ciru_OCI/`](https://cginfo.shinyapps.io/Painel_Ciru_OCI/)
 

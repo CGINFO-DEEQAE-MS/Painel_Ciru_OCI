@@ -36,6 +36,11 @@ dados/raw/
 dados/temp/
 dados/processados/
 
+# Dados da Portaria 9.810 (mantidos manualmente, não vão para o Git —
+# precisam ser marcados manualmente ao publicar no shinyapps.io)
+dados/BaseValorliquidoPortaria9810.xlsx
+dados/PORTARIA_9.810_UF.xlsx
+
 # Resultados
 resultados/
 

@@ -27,6 +27,10 @@ MES_LABELS <- c(
   "Jul", "Ago", "Set", "Out", "Nov", "Dez"
 )
 
+# Abreviações de mês em minúsculo (pt-BR) usadas pela coluna MÊS da base
+# da Portaria 9.810.
+MESES_ABREV_PT <- tolower(MES_LABELS)
+
 # Rótulos "Mês/AA" em português para eixos de data (o Plotly só formata
 # datas em inglês por padrão, sem carregar um locale de JS à parte).
 rotular_mes_ano_pt <- function(datas) {
@@ -250,6 +254,91 @@ carregar_mapa_especialidade_rol <- function() {
   mapa[]
 }
 
+# Pagamentos da Portaria nº 9.810 (Valor Líquido), mantido manualmente em
+# dados/BaseValorliquidoPortaria9810.xlsx (não vem de projeto irmão — é uma
+# planilha de referência própria do painel). Regra fixa da aba: o arquivo
+# bruto traz outras portarias misturadas, então só entram linhas com
+# NU_PORTARIA 09810/9810. Data de pagamento = ANO + MÊS (coluna de texto,
+# ex. "set").
+# Resume os valores da coluna PROGRAMA (nomes longos e técnicos) nos 4
+# rótulos usados como filtro de Componente no painel. "MUTIRÃO" (MAC) entra
+# junto com "Componente Cirúrgico" — mesma frente MAC de cirurgia, só que
+# via força-tarefa.
+mapear_programa_portaria9810 <- function(programa) {
+
+  programa_norm <- stri_trans_general(toupper(trimws(programa)), "Latin-ASCII")
+
+  fcase(
+    stri_detect_fixed(programa_norm, "COMPONENTE AMBULATORIAL"), "Componente Ambulatorial",
+    stri_detect_fixed(programa_norm, "COMPONENTE CIRURGICO") | stri_detect_fixed(programa_norm, "MUTIRAO"),
+    "Componente Cirúrgico",
+    stri_detect_fixed(programa_norm, "PMAE"), "FAEC - PMAE",
+    stri_detect_fixed(programa_norm, "REDUCAO DAS FILAS"), "FAEC PNRF",
+    default = programa_norm
+  )
+}
+
+carregar_portaria9810 <- function() {
+
+  arquivo <- file.path("dados", "BaseValorliquidoPortaria9810.xlsx")
+
+  if (!file.exists(arquivo)) {
+    return(NULL)
+  }
+
+  bruto <- setDT(as.data.frame(read_excel(arquivo, sheet = "Sheet1")))
+  bruto <- bruto[NU_PORTARIA %chin% c("09810", "9810")]
+
+  dt <- bruto[, .(
+    SG_UF = toupper(trimws(UF)),
+    CO_MUNICIPIO_IBGE,
+    MUNICIPIO = toupper(trimws(MUNICIPIO)),
+    TIPO_GESTAO = stri_trans_general(toupper(trimws(TP_REPASSE)), "Latin-ASCII"),
+    COMPONENTE = mapear_programa_portaria9810(PROGRAMA),
+    ANO = as.integer(ANO),
+    MES_ABREV = tolower(trimws(`MÊS`)),
+    VALOR_LIQUIDO = suppressWarnings(as.numeric(`Valor Liquido`))
+  )]
+
+  dt[, MES := match(MES_ABREV, MESES_ABREV_PT)]
+  dt <- dt[!is.na(SG_UF) & SG_UF != "" & !is.na(ANO) & !is.na(MES)]
+  dt[, DATA_PAGAMENTO := as.Date(sprintf("%04d-%02d-01", ANO, MES))]
+
+  dt <- merge(dt, UF_REF[, .(SG_UF, NM_UF_OCI, REGIAO)], by = "SG_UF", all.x = TRUE)
+  setnames(dt, "NM_UF_OCI", "NM_UF")
+  dt[, NM_UF := factor(NM_UF, levels = UF_REF$NM_UF_OCI)]
+
+  dt[]
+}
+
+# Limite de repasse por UF definido na Portaria nº 9.810, mantido
+# manualmente em dados/PORTARIA_9.810_UF.xlsx.
+carregar_limite_portaria9810 <- function() {
+
+  arquivo <- file.path("dados", "PORTARIA_9.810_UF.xlsx")
+
+  if (!file.exists(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- setDT(as.data.frame(read_excel(arquivo, sheet = "Planilha1")))
+  setnames(dt, c("SG_UF", "POPULACAO_ESTIMADA", "VALOR_LIMITE"))
+
+  dt[, SG_UF := toupper(trimws(SG_UF))]
+  # A planilha traz uma linha "TOTAL" e rodapés (título/fonte da portaria)
+  # abaixo da tabela de UFs — descarta tudo que não for uma sigla válida.
+  dt <- dt[SG_UF %chin% UF_REF$SG_UF]
+
+  dt[, VALOR_LIMITE := suppressWarnings(as.numeric(VALOR_LIMITE))]
+  dt[, POPULACAO_ESTIMADA := suppressWarnings(as.numeric(POPULACAO_ESTIMADA))]
+
+  dt <- merge(dt, UF_REF[, .(SG_UF, NM_UF_OCI, REGIAO)], by = "SG_UF", all.x = TRUE)
+  setnames(dt, "NM_UF_OCI", "NM_UF")
+  dt[, NM_UF := factor(NM_UF, levels = UF_REF$NM_UF_OCI)]
+
+  dt[]
+}
+
 status_cirurgia <- function(serie) {
 
   if (is.null(serie)) {
@@ -390,6 +479,8 @@ carregar_tudo <- function() {
     cirurgia_municipio_pab = carregar_serie_municipio_cirurgia("pab"),
     cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
     mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
+    portaria9810 = carregar_portaria9810(),
+    portaria9810_limite = carregar_limite_portaria9810(),
     oci_serie = carregar_serie_oci(),
     oci_especialidade_componente_uf = carregar_oci_especialidade_componente_uf(),
     oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio()
@@ -1055,6 +1146,138 @@ grafico_oci_mensal_anos <- function(dados, titulo) {
     alta_resolucao("oci_mensal_2025_2026")
 }
 
+CORES_TIPO_GESTAO <- c("ESTADUAL" = "#185FA5", "MUNICIPAL" = "#D85A30")
+
+# Colunas empilhadas por mês de pagamento, separadas por tipo de gestão
+# (Estadual/Municipal).
+grafico_portaria9810_mensal <- function(dados, titulo) {
+
+  d <- dados[order(DATA_PAGAMENTO)]
+  datas_unicas <- sort(unique(d$DATA_PAGAMENTO))
+
+  p <- plot_ly()
+
+  for (tipo_atual in names(CORES_TIPO_GESTAO)) {
+    dd <- d[TIPO_GESTAO == tipo_atual]
+    if (nrow(dd) == 0) next
+    p <- add_trace(
+      p, data = dd, x = ~DATA_PAGAMENTO, y = ~valor, type = "bar",
+      name = stri_trans_totitle(tipo_atual),
+      marker = list(color = CORES_TIPO_GESTAO[[tipo_atual]]),
+      hovertemplate = paste0(stri_trans_totitle(tipo_atual), "<br>%{x}<br>R$ %{y:,.0f}<extra></extra>")
+    )
+  }
+
+  p |>
+    layout(
+      title = list(text = titulo, x = 0),
+      barmode = "stack",
+      xaxis = list(
+        title = "Mês de pagamento",
+        tickmode = "array",
+        tickvals = datas_unicas,
+        ticktext = rotular_mes_ano_pt(datas_unicas),
+        tickangle = -45
+      ),
+      yaxis = list(title = "Valor líquido (R$)", tickformat = ",.0f"),
+      legend = list(orientation = "h", y = -0.3),
+      margin = list(b = 100),
+      separators = ",."
+    ) |>
+    alta_resolucao("portaria9810_pagamentos_mensal")
+}
+
+CORES_PROGRAMA_PORTARIA9810 <- c(
+  "Componente Ambulatorial" = "#185FA5",
+  "Componente Cirúrgico"    = "#D85A30",
+  "FAEC - PMAE"             = "#2e8b57",
+  "FAEC PNRF"               = "#a4508b"
+)
+
+# Uma linha por Componente (categoria resumida da coluna PROGRAMA — ver
+# mapear_programa_portaria9810()), por mês de pagamento.
+grafico_portaria9810_programa <- function(dados, titulo) {
+
+  d <- dados[order(DATA_PAGAMENTO)]
+  datas_unicas <- sort(unique(d$DATA_PAGAMENTO))
+
+  categorias <- unique(c(names(CORES_PROGRAMA_PORTARIA9810), as.character(d$COMPONENTE)))
+
+  p <- plot_ly()
+
+  for (categoria_atual in categorias) {
+    dd <- d[COMPONENTE == categoria_atual]
+    if (nrow(dd) == 0) next
+    cor_atual <- CORES_PROGRAMA_PORTARIA9810[[categoria_atual]]
+    p <- add_trace(
+      p, data = dd, x = ~DATA_PAGAMENTO, y = ~valor, type = "scatter", mode = "lines+markers",
+      name = categoria_atual,
+      line = list(color = cor_atual, width = 2.4, dash = if (is.null(cor_atual)) "dot" else "solid"),
+      marker = list(color = cor_atual, size = 6),
+      hovertemplate = paste0(categoria_atual, "<br>%{x}<br>R$ %{y:,.0f}<extra></extra>")
+    )
+  }
+
+  p |>
+    layout(
+      title = list(text = titulo, x = 0),
+      xaxis = list(
+        title = "Mês de pagamento",
+        tickmode = "array",
+        tickvals = datas_unicas,
+        ticktext = rotular_mes_ano_pt(datas_unicas),
+        tickangle = -45
+      ),
+      yaxis = list(title = "Valor líquido (R$)", tickformat = ",.0f"),
+      hovermode = "x unified",
+      legend = list(orientation = "h", y = -0.3),
+      margin = list(b = 100),
+      separators = ",."
+    ) |>
+    alta_resolucao("portaria9810_por_componente_programa")
+}
+
+# Barras horizontais com o % do limite da Portaria 9.810 já utilizado por
+# UF (pago / limite), ordenado do maior para o menor, com marcação em 100%.
+grafico_portaria9810_limite <- function(dados, titulo) {
+
+  d <- dados[order(percentual)]
+  d[, NM_UF := factor(as.character(NM_UF), levels = as.character(NM_UF))]
+
+  cores_status <- c(
+    "Dentro do limite" = "#479139",
+    "Ultrapassou o limite" = "#FF0000"
+  )
+
+  # Texto do hover montado em R (não via %{customdata[n]}, que não
+  # substitui corretamente no htmlwidget do plotly para R).
+  d[, hover_label := paste0(
+    NM_UF, "<br>Pago: R$ ", format(round(valor_pago), big.mark = ".", scientific = FALSE),
+    "<br>Limite: R$ ", format(round(VALOR_LIMITE), big.mark = ".", scientific = FALSE),
+    "<br>", format(round(percentual * 100, 1), decimal.mark = ","), "% do limite"
+  )]
+
+  plot_ly(
+    data = d, y = ~NM_UF, x = ~percentual, type = "bar", orientation = "h",
+    marker = list(color = cores_status[d$status]),
+    hovertext = ~hover_label,
+    hovertemplate = "%{hovertext}<extra></extra>"
+  ) |>
+    layout(
+      title = list(text = titulo, x = 0),
+      xaxis = list(title = "% do limite utilizado", tickformat = ",.0%"),
+      yaxis = list(title = ""),
+      shapes = list(list(
+        type = "line", x0 = 1, x1 = 1, y0 = -0.5, y1 = length(unique(d$NM_UF)) - 0.5,
+        line = list(color = "black", dash = "dash", width = 1.2)
+      )),
+      showlegend = FALSE,
+      margin = list(l = 150),
+      separators = ",."
+    ) |>
+    alta_resolucao("portaria9810_limite_uf")
+}
+
 #### UI ####
 
 # Bloco fixo com a origem dos dados, exibido abaixo dos filtros nas duas abas.
@@ -1120,7 +1343,8 @@ ui <- page_navbar(
            'grafico_cirurgia', 'grafico_comparacao_anos',
            'grafico_oci_componente', 'grafico_oci_componente_ano', 'grafico_oci_componente_mes',
            'grafico_oci_especialidade', 'grafico_oci_especialidade_componente',
-           'grafico_oci_fisico_especialidade', 'grafico_oci_mensal_anos'
+           'grafico_oci_fisico_especialidade', 'grafico_oci_mensal_anos',
+           'grafico_portaria9810_mensal', 'grafico_portaria9810_programa', 'grafico_portaria9810_limite'
          ].forEach(function (id) {
            var el = document.getElementById(id);
            if (el && window.Plotly) { Plotly.Plots.resize(el); }
@@ -1329,6 +1553,64 @@ ui <- page_navbar(
           h5("Produção mensal — 2025 vs 2026"),
           plotlyOutput("grafico_oci_mensal_anos", height = "38vh"),
           barra_downloads("grafico_oci_mensal_anos")
+        )
+      )
+    )
+  ),
+
+  nav_panel(
+    "Pagamento Portaria 9810",
+    layout_sidebar(
+      sidebar = sidebar(
+        open = "always",
+        selectInput("uf_portaria9810", "UF", choices = "BRASIL", selected = "BRASIL"),
+        selectInput(
+          "municipio_portaria9810", "Município",
+          choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
+        ),
+        checkboxGroupInput(
+          "tipo_gestao_portaria9810", "Tipo de Gestão",
+          choices = c("Estadual", "Municipal"), selected = c("Estadual", "Municipal")
+        ),
+        checkboxGroupInput(
+          "componente_portaria9810", "Componente",
+          choices = character(0), selected = character(0)
+        ),
+        div(
+          class = "text-muted small mt-2", style = "line-height: 1.3;",
+          "Considera somente pagamentos da Portaria nº 9.810 (Valor Líquido)."
+        )
+      ),
+      tabsetPanel(
+        id = "subaba_portaria9810",
+        type = "tabs",
+        tabPanel(
+          "Pagamentos",
+          br(),
+          h5("Pagamentos por mês"),
+          plotlyOutput("grafico_portaria9810_mensal", height = "42vh"),
+          barra_downloads("grafico_portaria9810_mensal"),
+          br(),
+          h5("Pagamentos por mês e por Componente"),
+          plotlyOutput("grafico_portaria9810_programa", height = "42vh"),
+          barra_downloads("grafico_portaria9810_programa"),
+          br(),
+          h5("Detalhamento por UF"),
+          DTOutput("tabela_portaria9810_uf")
+        ),
+        tabPanel(
+          "Limite da Portaria 9810",
+          br(),
+          div(
+            class = "text-muted small mb-2", style = "line-height: 1.3;",
+            "O limite da Portaria 9.810 é definido por UF inteira (todos os municípios e tipos de gestão) — os filtros de Município e Tipo de Gestão não se aplicam aqui."
+          ),
+          h5("Valor pago x limite por UF"),
+          plotlyOutput("grafico_portaria9810_limite", height = "58vh"),
+          barra_downloads("grafico_portaria9810_limite"),
+          br(),
+          h5("Tabela de acompanhamento"),
+          DTOutput("tabela_portaria9810_limite")
         )
       )
     )
@@ -2016,6 +2298,202 @@ server <- function(input, output, session) {
     )
   })
 
+  ## ---- Pagamento Portaria 9810 ----
+
+  # Popula UF e Componente a partir da base carregada (só uma vez — a base
+  # não muda durante a sessão, diferente de dados() no resto do painel, que
+  # é atualizado por sincronizar_dados_locais()).
+  observeEvent(dados(), {
+
+    base <- dados()$portaria9810
+    if (is.null(base)) {
+      return()
+    }
+
+    ufs <- sort(unique(as.character(base$NM_UF)))
+    escolhas_uf <- setNames(c("BRASIL", ufs), c("BRASIL (todos os estados)", ufs))
+    updateSelectInput(session, "uf_portaria9810", choices = escolhas_uf, selected = "BRASIL")
+
+    componentes <- sort(unique(base$COMPONENTE))
+    updateCheckboxGroupInput(
+      session, "componente_portaria9810", choices = componentes, selected = componentes
+    )
+  }, once = TRUE)
+
+  # Cascata UF -> Município (mesma lógica das outras abas).
+  observeEvent(list(input$uf_portaria9810, dados()$portaria9810), {
+
+    base <- dados()$portaria9810
+
+    if (is.null(input$uf_portaria9810) || input$uf_portaria9810 == "BRASIL" || is.null(base)) {
+      updateSelectInput(session, "municipio_portaria9810", choices = c("Selecione uma UF" = "Todos"), selected = "Todos")
+      return()
+    }
+
+    municipios <- sort(unique(base[NM_UF == input$uf_portaria9810]$MUNICIPIO))
+    escolhas <- setNames(c("Todos", municipios), c("Todos (UF inteira)", municipios))
+
+    selecionado <- if (isTRUE(input$municipio_portaria9810 %in% escolhas)) input$municipio_portaria9810 else "Todos"
+
+    updateSelectInput(session, "municipio_portaria9810", choices = escolhas, selected = selecionado)
+  })
+
+  municipio_portaria9810_ativo <- reactive({
+    isTRUE(input$uf_portaria9810 != "BRASIL") && !is.null(input$municipio_portaria9810) && input$municipio_portaria9810 != "Todos"
+  })
+
+  rotulo_local_portaria9810 <- reactive({
+    if (municipio_portaria9810_ativo()) {
+      paste0(input$municipio_portaria9810, " (", input$uf_portaria9810, ")")
+    } else if (input$uf_portaria9810 == "BRASIL") {
+      "BRASIL"
+    } else {
+      input$uf_portaria9810
+    }
+  })
+
+  # Base filtrada por UF/Município/Tipo de Gestão/Componente — usada só na
+  # subaba "Pagamentos" (a subaba de Limite ignora Município e Tipo de
+  # Gestão de propósito, ver dados_portaria9810_limite()).
+  portaria9810_filtrada <- reactive({
+
+    base <- dados()$portaria9810
+    validate(need(!is.null(base), "Base de pagamentos da Portaria 9.810 não encontrada em dados/BaseValorliquidoPortaria9810.xlsx."))
+
+    validate(need(length(input$tipo_gestao_portaria9810) > 0, "Selecione ao menos um tipo de gestão."))
+    validate(need(length(input$componente_portaria9810) > 0, "Selecione ao menos um componente."))
+
+    tipos_sel <- toupper(stri_trans_general(input$tipo_gestao_portaria9810, "Latin-ASCII"))
+    base <- base[TIPO_GESTAO %chin% tipos_sel & COMPONENTE %chin% input$componente_portaria9810]
+
+    if (isTRUE(input$uf_portaria9810 != "BRASIL")) {
+      base <- base[NM_UF == input$uf_portaria9810]
+    }
+
+    if (municipio_portaria9810_ativo()) {
+      base <- base[MUNICIPIO == input$municipio_portaria9810]
+    }
+
+    base
+  })
+
+  dados_portaria9810_mensal <- reactive({
+
+    base <- portaria9810_filtrada()
+    validate(need(nrow(base) > 0, "Sem dados para a seleção atual."))
+
+    base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, TIPO_GESTAO)]
+  })
+
+  output$grafico_portaria9810_mensal <- renderPlotly({
+
+    grafico_portaria9810_mensal(
+      dados_portaria9810_mensal(),
+      titulo = paste0("Pagamentos Portaria 9.810 — ", rotulo_local_portaria9810())
+    )
+  })
+
+  dados_portaria9810_programa <- reactive({
+
+    base <- portaria9810_filtrada()
+    validate(need(nrow(base) > 0, "Sem dados para a seleção atual."))
+
+    base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, COMPONENTE)]
+  })
+
+  output$grafico_portaria9810_programa <- renderPlotly({
+
+    grafico_portaria9810_programa(
+      dados_portaria9810_programa(),
+      titulo = paste0("Pagamentos por Componente — ", rotulo_local_portaria9810())
+    )
+  })
+
+  output$tabela_portaria9810_uf <- renderDT({
+
+    base <- portaria9810_filtrada()
+    validate(need(nrow(base) > 0, ""))
+
+    agregada <- base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(NM_UF, TIPO_GESTAO)]
+    tabela <- dcast(
+      agregada, NM_UF ~ TIPO_GESTAO,
+      value.var = "valor", fun.aggregate = sum, fill = 0
+    )
+    colunas_valor <- setdiff(names(tabela), "NM_UF")
+
+    datatable(
+      tabela,
+      colnames = c("UF", stri_trans_totitle(colunas_valor)),
+      rownames = FALSE,
+      options = list(pageLength = 10, order = list(list(1, "desc")))
+    ) |>
+      formatCurrency(colunas_valor, currency = "R$ ", interval = 3, mark = ".", digits = 0)
+  })
+
+  # "Limite da Portaria 9810": sempre por UF inteira (soma Estadual +
+  # Municipal, todos os municípios e componentes) — o limite da portaria não
+  # discrimina por tipo de gestão/município, então só o filtro de UF (para
+  # focar em um estado) se aplica aqui.
+  dados_portaria9810_limite <- reactive({
+
+    base <- dados()$portaria9810
+    limite <- dados()$portaria9810_limite
+    validate(need(
+      !is.null(base) && !is.null(limite),
+      "Bases da Portaria 9.810 não encontradas em dados/."
+    ))
+
+    pago_uf <- base[, .(valor_pago = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(SG_UF, NM_UF)]
+
+    comparacao <- merge(limite, pago_uf, by = c("SG_UF", "NM_UF"), all.x = TRUE)
+    comparacao[is.na(valor_pago), valor_pago := 0]
+    comparacao[, percentual := valor_pago / VALOR_LIMITE]
+    comparacao[, status := fifelse(valor_pago > VALOR_LIMITE, "Ultrapassou o limite", "Dentro do limite")]
+
+    if (isTRUE(input$uf_portaria9810 != "BRASIL")) {
+      comparacao <- comparacao[NM_UF == input$uf_portaria9810]
+    }
+
+    validate(need(nrow(comparacao) > 0, "Sem dados para a seleção atual."))
+    setorder(comparacao, percentual)
+
+    comparacao[]
+  })
+
+  rotulo_agregado_portaria9810 <- reactive({
+    if (input$uf_portaria9810 == "BRASIL") "BRASIL" else input$uf_portaria9810
+  })
+
+  output$grafico_portaria9810_limite <- renderPlotly({
+
+    grafico_portaria9810_limite(
+      dados_portaria9810_limite(),
+      titulo = paste0("Valor pago x limite — Portaria 9.810 — ", rotulo_agregado_portaria9810())
+    )
+  })
+
+  output$tabela_portaria9810_limite <- renderDT({
+
+    comparacao <- dados_portaria9810_limite()
+
+    tabela <- comparacao[order(-percentual), .(NM_UF, valor_pago, VALOR_LIMITE, percentual, status)]
+
+    datatable(
+      tabela,
+      colnames = c("UF", "Valor Pago", "Limite (R$)", "% do Limite", "Status"),
+      rownames = FALSE,
+      options = list(pageLength = 10, order = list(list(3, "desc")))
+    ) |>
+      formatCurrency(c("valor_pago", "VALOR_LIMITE"), currency = "R$ ", interval = 3, mark = ".", digits = 0) |>
+      formatPercentage("percentual", 1) |>
+      formatStyle(
+        "status",
+        backgroundColor = styleEqual(
+          c("Dentro do limite", "Ultrapassou o limite"), c("#d4edda", "#f8d7da")
+        )
+      )
+  })
+
   ## ---- Exportação de dados (CSV) dos 8 gráficos ----
   # Cada gráfico expõe os mesmos dados usados para plotar (nenhum recálculo).
 
@@ -2054,11 +2532,17 @@ server <- function(input, output, session) {
   output$grafico_oci_fisico_especialidade_csv <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
   output$grafico_oci_mensal_anos_csv <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
 
+  output$grafico_portaria9810_mensal_csv <- handler_csv(dados_portaria9810_mensal, "portaria9810_pagamentos_mensal")
+  output$grafico_portaria9810_programa_csv <- handler_csv(
+    dados_portaria9810_programa, "portaria9810_por_componente"
+  )
+  output$grafico_portaria9810_limite_csv <- handler_csv(dados_portaria9810_limite, "portaria9810_limite_uf")
+
   # Os botões de download ficam dentro de sub-abas que já nascem "ativas"
   # (a primeira de cada tabsetPanel). Como elas nunca disparam um evento de
   # troca de aba do Bootstrap, o Shiny não desconsidera a suspensão padrão
   # de outputs escondidos e o link de download nunca é calculado. Aqui isso
-  # é desligado especificamente para esses 9 outputs (não afeta os
+  # é desligado especificamente para esses 12 outputs (não afeta os
   # gráficos/tabelas, que continuam suspensos até a aba ser visitada).
   botoes_download <- c(
     "grafico_cirurgia_csv",
@@ -2069,7 +2553,10 @@ server <- function(input, output, session) {
     "grafico_oci_especialidade_csv",
     "grafico_oci_especialidade_componente_csv",
     "grafico_oci_fisico_especialidade_csv",
-    "grafico_oci_mensal_anos_csv"
+    "grafico_oci_mensal_anos_csv",
+    "grafico_portaria9810_mensal_csv",
+    "grafico_portaria9810_programa_csv",
+    "grafico_portaria9810_limite_csv"
   )
   for (id_botao in botoes_download) {
     outputOptions(output, id_botao, suspendWhenHidden = FALSE)
