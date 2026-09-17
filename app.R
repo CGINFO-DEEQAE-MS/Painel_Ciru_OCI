@@ -719,12 +719,21 @@ anotacao_dados_preliminares <- function(datas_unicas) {
 # (equivalente ao par shapes/annotations do plotly nativo) — usada nos
 # gráficos convertidos para ggplot. Retorna uma lista de camadas, somada
 # com "+" a um ggplot como qualquer outra camada.
-sombra_dados_preliminares_gg <- function(datas_unicas) {
+#
+# Usa geom_rect()/geom_text() com data frame próprio (inherit.aes = FALSE),
+# em vez de annotate(): o ggplotly() descarta silenciosamente camadas
+# annotate() (shapes/annotations saem vazios do lado do plotly). E o
+# ymin/ymax precisa ser um número finito, não -Inf/Inf: o ggplotly()
+# converte Inf em NA nas coordenadas do trace, o que apaga o retângulo
+# (renderiza sem erro, só que invisível). Por isso recebe y_max — o maior
+# valor de Y realmente plotado no gráfico — para cobrir toda a área visível
+# com folga (1.08x) em vez de "infinito".
+sombra_dados_preliminares_gg <- function(datas_unicas, y_max) {
 
   datas_unicas <- sort(unique(datas_unicas))
   n <- length(datas_unicas)
 
-  if (n < 1) {
+  if (n < 1 || !is.finite(y_max)) {
     return(list())
   }
 
@@ -733,9 +742,19 @@ sombra_dados_preliminares_gg <- function(datas_unicas) {
   x1 <- seq(datas_unicas[n], by = "1 month", length.out = 2)[2]
   x_meio <- as.Date(mean(c(as.numeric(x0), as.numeric(x1))), origin = "1970-01-01")
 
+  y_topo <- y_max * 1.08
+
   list(
-    annotate("rect", xmin = x0, xmax = x1, ymin = -Inf, ymax = Inf, fill = "grey50", alpha = 0.18),
-    annotate("text", x = x_meio, y = Inf, label = "Dados preliminares", vjust = 1.6, size = 3.3, colour = "#666666")
+    geom_rect(
+      data = data.frame(xmin = x0, xmax = x1),
+      aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = y_topo),
+      inherit.aes = FALSE, fill = "grey50", alpha = 0.18
+    ),
+    geom_text(
+      data = data.frame(x = x_meio, y = y_topo, label = "Dados preliminares"),
+      aes(x = x, y = y, label = label),
+      inherit.aes = FALSE, vjust = 1.3, size = 3.3, colour = "#666666"
+    )
   )
 }
 
@@ -943,9 +962,10 @@ grafico_oci_componente <- function(dados_geral, dados_componente, titulo) {
   dc[, texto := paste0(COMPONENTE, "<br>", rotulo_mes, "<br>OCI: ", label_pt_num(OCI))]
 
   cores_legenda <- CORES_COMPONENTE_OCI[c("Total geral de OCI", ORDEM_COMPONENTES_OCI)]
+  y_max <- max(dg$oci, dc$OCI, 0, na.rm = TRUE)
 
   ggplot() +
-    sombra_dados_preliminares_gg(datas_unicas) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
     geom_area(
       data = dg, aes(x = competencia, y = oci),
       fill = CORES_COMPONENTE_OCI[["Total geral de OCI"]], alpha = 0.10
@@ -1028,9 +1048,10 @@ grafico_oci_componente_mes <- function(dados, titulo) {
   d[, texto := paste0(COMPONENTE, "<br>", rotulo_mes, "<br>OCI: ", label_pt_num(OCI))]
 
   datas_unicas <- sort(unique(d$competencia))
+  y_max <- max(d[, .(total = sum(OCI, na.rm = TRUE)), by = competencia]$total, 0, na.rm = TRUE)
 
   ggplot(d, aes(x = competencia, y = OCI, fill = COMPONENTE, text = texto)) +
-    sombra_dados_preliminares_gg(datas_unicas) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
     geom_col(width = 25) +
     scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI) +
     scale_x_date(breaks = datas_unicas, labels = rotular_mes_ano_pt(datas_unicas)) +
@@ -1051,9 +1072,10 @@ grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) 
   dg[, texto := paste0("Geral<br>", rotulo_mes, "<br>OCI: ", label_pt_num(oci))]
 
   datas_unicas <- sort(unique(dg$competencia))
+  y_max <- max(dg$oci, dados_especialidade$OCI, 0, na.rm = TRUE)
 
   p <- ggplot() +
-    sombra_dados_preliminares_gg(datas_unicas) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
     geom_line(
       data = dg, aes(x = competencia, y = oci, colour = "Geral", group = 1),
       linewidth = 1.3
