@@ -25,6 +25,10 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 - Aba "Pagamentos": total por mês de pagamento empilhado por Tipo de Gestão; gráfico de linhas por mês de pagamento com uma linha por Componente; tabela de detalhamento por UF com colunas Estadual, Municipal e Total.
 - Aba "Limite da Portaria 9810": valor pago x limite de repasse por UF (`dados/PORTARIA_9.810_UF.xlsx`), sempre por UF inteira (soma Estadual + Municipal, todos os municípios — os filtros de Município e Tipo de Gestão não se aplicam aqui), com destaque visual para UFs que já ultrapassaram o limite.
 
+## Exportação dos gráficos
+
+Todo gráfico do painel tem, logo abaixo, dois botões de exportação: **Dados (CSV)**, com os dados brutos por trás do gráfico, e **Slide editável (PPTX)** — o mesmo gráfico como slide de PowerPoint com o desenho totalmente editável (cores, texto, posição), não uma imagem (via `ggplot2` + `rvg::dml()`, empacotado com `officer`). O ícone de câmera no canto do gráfico continua disponível para exportar PNG em alta resolução.
+
 ## Fonte dos dados
 
 Os dados têm origem pública, disponibilizados pelo Ministério da Saúde na plataforma **SUS360**:
@@ -58,7 +62,7 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
 
 `dados/processados/` é a principal fonte que o `app.R` lê (mais o `Relacao_cirugiasROL.xlsx` acima, que fica direto em `dados/`). A pasta `processados/` é ignorada pelo Git (não vai para o GitHub) e existe em dois estados:
 
-- **Local**: o app copia automaticamente a versão mais recente das planilhas dos projetos irmãos toda vez que abre, ou quando "Atualizar dados" é clicado — desde que `Cirurgia/` e `OCI/` estejam na mesma pasta pai deste projeto.
+- **Local**: o app copia automaticamente a versão mais recente das planilhas dos projetos irmãos toda vez que abre — desde que `Cirurgia/` e `OCI/` estejam na mesma pasta pai deste projeto.
 - **Publicado no shinyapps.io**: como o servidor não tem acesso às pastas irmãs, ele usa a última cópia enviada junto no deploy.
 
 ## Estrutura de pastas
@@ -89,7 +93,7 @@ shiny::runApp()
 
 Na primeira execução, se os projetos `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R` no projeto Cirurgia, e `Monitoramento_oci_uf_2025_2026.R` no projeto OCI), os dados são sincronizados automaticamente para `dados/processados/`.
 
-Depende do pacote `shinyWidgets` (dropdown de Região com múltipla escolha), além de shiny, bslib, plotly, DT, data.table, readxl e stringi.
+Depende do pacote `shinyWidgets` (dropdown de Região com múltipla escolha) e de `officer`, `ggplot2`, `scales` e `rvg` (exportação dos gráficos como slide editável em PowerPoint), além de shiny, bslib, plotly, DT, data.table, readxl e stringi.
 
 ## Publicar / atualizar no shinyapps.io
 
