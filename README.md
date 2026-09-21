@@ -1,69 +1,68 @@
 # Painel para monitoramento da produção física e financeira ATE
 
-Painel em **R Shiny** para acompanhar mensalmente a produção física e financeira de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF), das **Ofertas de Cuidados Integrados (OCI)** e do **Pagamento Portaria 9810**
+Painel em **R Shiny** para acompanhar mensalmente a produção física e financeira de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF), das **Ofertas de Cuidados Integrados (OCI)** e do **Pagamento Portaria 9810**.
 
 ## Funcionalidades
 
 **Cirurgias eletivas**
-- Diagrama de controle: faixa histórica (min-máx e Q1-Q3), mediana, produção do ano de comparação e do ano monitorado, com classificação mensal em 5 níveis (Esperado, Acima do esperado, Acima do limite esperado, Atenção, Crítico abaixo do limite esperado) — disponível para ROL e Total (Físico e Financeiro) e, dentro do ROL, também por Especialidade. PNRF não tem diagrama (histórico ainda curto demais para faixas confiáveis); o modo Financeiro não mostra classificação por cor (só a linha de produção).
-- Filtros: indicador (MAC e FAEC totais / do Rol / Ciru. PATE-PNRF), Região (múltipla escolha em dropdown) e UF lado a lado, Município (só "Comparação Anos"), e — só para o indicador ROL — Especialidade e Procedimento, cruzando com `dados/Relacao_cirugiasROL.xlsx`. Especialidade vale para "Comparação Anos" e "Diagrama de monitoramento"; Procedimento (multisseleção, soma os selecionados) só para "Comparação Anos".
-- Checkbox "Cirurgias Eletivas PAB", abaixo do indicador: quando marcado, substitui o indicador do dropdown **só em "Comparação Anos"** (Diagrama de monitoramento e Tabela continuam sempre no indicador do dropdown, sem PAB — não há diagrama de controle nem tabela de status para PAB). PAB não tem valor financeiro nas extrações atuais (só MAC/FAEC têm); o toggle Financeiro fica bloqueado com aviso quando PAB está marcado.
-- Abas "Comparação Anos", "Diagrama de monitoramento" e "Tabela" (classificação do último mês por UF, sempre Físico, independente do toggle).
+- Diagrama de controle: faixa histórica (min-máx e Q1-Q3), mediana, produção do ano de comparação x ano monitorado, com classificação mensal em 5 níveis (Esperado → Crítico abaixo do limite). Disponível para ROL/Total (Físico e Financeiro) e, no ROL, também por Especialidade. PNRF não tem diagrama (histórico curto); o modo Financeiro não classifica por cor.
+- Filtros: indicador (MAC e FAEC totais / Rol / Ciru. PATE-PNRF), Região (multisseleção) + UF, Município (só "Comparação Anos"), e — só no ROL — Especialidade/Procedimento, cruzando com `dados/Relacao_cirugiasROL.xlsx` (Especialidade vale para "Comparação Anos" e "Diagrama"; Procedimento, multisseleção, só para "Comparação Anos").
+- Checkbox "Cirurgias Eletivas PAB" substitui o indicador do dropdown **só em "Comparação Anos"** (Diagrama e Tabela continuam sem PAB); PAB não tem financeiro, então o toggle Financeiro fica bloqueado quando marcado.
+- Abas "Comparação Anos", "Diagrama de monitoramento" e "Tabela" (status do último mês por UF, sempre Físico).
 
 **OCI realizadas**
-- Todas as análises usam mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`, mês em que a OCI foi efetivamente realizada), não mês de processamento;
-- Os gráficos com série mensal por mês de atendimento ("OCI geral", "Por mês de atendimento" e "OCI por especialidade") destacam os últimos 3 meses com uma faixa cinza e o rótulo "Dados preliminares" — a base ainda não fechou totalmente essas competências (ver `sombra_dados_preliminares()`/`anotacao_dados_preliminares()` em `app.R`);
-- Aba "Série histórica OCI": um único gráfico "OCI geral" — onda de área com o Total geral de OCI e marcação da virada de ano de referência, com uma linha sobreposta por componente/modalidade (Componente Ambulatorial, Carretas, Créditos Financeiros, Equipes Volantes), cada uma podendo ser ligada/desligada clicando na legenda — e, logo abaixo, dois gráficos empilhados por componente (mesmas cores do gráfico de referência do projeto OCI): "Por ano" (2025 vs 2026, barras horizontais) e, em seguida, "Por mês de atendimento" (colunas verticais);
-- Aba "Série histórica OCI por especialidade": mesmo gráfico "Geral + por especialidade" de antes, mas isolado numa subaba própria, com filtro de Especialidade e um filtro de Componente (OCI geral ou um componente específico) que só existem ali; logo abaixo, um gráfico de colunas empilhadas "Por especialidade e componente" — total do período por especialidade (ordenado do maior para o menor), sempre quebrado pelos 4 componentes independente do filtro de Componente;
-- Aba "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com seu próprio filtro de Especialidade (independente do da subaba anterior) e um filtro de Componente igual ao da subaba anterior — o comparativo mensal ignora o filtro de Especialidade, mas respeita o de Componente;
-- Mesma lógica de filtro por região/UF/município e agregado dinâmico do painel de cirurgias.
+- Usa mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`), não mês de processamento.
+- Gráficos mensais ("OCI geral", "Por mês de atendimento", "OCI por especialidade") sombreiam os últimos 3 meses com "Dados preliminares" — a base ainda não fechou essas competências (`sombra_dados_preliminares()`/`anotacao_dados_preliminares()` em `app.R`).
+- "Série histórica OCI": gráfico "OCI geral" (Total + uma linha por componente/modalidade, liga/desliga pela legenda, com marcação da virada de ano) e, abaixo, dois empilhados por componente — "Por ano" e "Por mês de atendimento".
+- "Série histórica OCI por especialidade": Geral + especialidade numa subaba própria, com filtros de Especialidade e Componente; abaixo, colunas empilhadas "Por especialidade e componente" (sempre pelos 4 componentes).
+- "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com filtros próprios de Especialidade e Componente (o comparativo mensal ignora Especialidade, mas respeita Componente).
+- Mesma lógica de filtro por região/UF/município do painel de cirurgias.
 
 **Pagamento Portaria 9810**
-- Acompanha os repasses da Portaria GM/MS nº 9.810/2025 (Programa Agora Tem Especialistas — Componentes Ambulatorial e Cirúrgico). Regra fixa da aba: só entram linhas com `NU_PORTARIA` 09810/9810 (a base bruta traz outras portarias misturadas) e só o Valor Líquido.
-- Filtros: UF, Município (cascata a partir da UF), Tipo de Gestão (Estadual/Municipal) e Componente. O filtro de Componente vem da coluna `PROGRAMA` da base, resumida em 5 rótulos: "Componente Ambulatorial", "Componente Cirúrgico", "Mutirão", "FAEC - PMAE*" e "FAEC PNRF*" (ver `mapear_programa_portaria9810()` em `app.R`) — os dois com "*" são Despesa de Exercício Anterior (nota na sidebar da aba).
-- Todas as análises usam mês de **pagamento** (ANO + MÊS da base), não mês de competência.
-- Aba "Pagamentos": total por mês de pagamento empilhado por Tipo de Gestão; gráfico de linhas por mês de pagamento com uma linha por Componente; tabela de detalhamento por UF com colunas Estadual, Municipal e Total.
-- Aba "Limite da Portaria 9810": valor pago x limite de repasse por UF (`dados/PORTARIA_9.810_UF.xlsx`), sempre por UF inteira (soma Estadual + Municipal, todos os municípios — os filtros de Município e Tipo de Gestão não se aplicam aqui), com destaque visual para UFs que já ultrapassaram o limite.
+- Repasses da Portaria GM/MS nº 9.810/2025 (Agora Tem Especialistas). Só entram linhas com `NU_PORTARIA` 09810/9810 e só o Valor Líquido.
+- Filtros: UF, Município (cascata), Tipo de Gestão e Componente — este último resumido em 5 rótulos a partir da coluna `PROGRAMA` (ver `mapear_programa_portaria9810()`); os com "*" são Despesa de Exercício Anterior.
+- Usa mês de **pagamento**, não mês de competência.
+- "Pagamentos": total por mês empilhado por Tipo de Gestão, linha por Componente, tabela por UF (Estadual/Municipal/Total).
+- "Limite da Portaria 9810": pago x limite por UF inteira (`dados/PORTARIA_9.810_UF.xlsx`, soma Estadual+Municipal — Município e Tipo de Gestão não se aplicam aqui), com destaque para quem ultrapassou.
+
+**Variação Cirurgias**
+- Aba trazida do projeto irmão `Analise_Espacial/app_semaforo` — mapas coropléticos da variação % de procedimentos entre 2025 e 2026, em 5 faixas de cor (Queda forte → Alta forte).
+- 3 mapas: **Brasil** (por UF, sem filtro), **Regiões de Saúde** (filtro de UF) e **Municípios** (filtro de UF e Município, multisseleção — acima de 20 municípios, os rótulos de % somem para não poluir).
+- Cada mapa tem seu próprio download em PPT editável e tabela em Excel.
+- Renderizado como imagem estática (`renderPlot`, não Plotly).
 
 ## Exportação dos gráficos
 
-Todo gráfico do painel tem, logo abaixo, dois botões de exportação: **Dados (CSV)**, com os dados brutos por trás do gráfico, e **Slide editável (PPTX)** — o mesmo gráfico como slide de PowerPoint com o desenho totalmente editável (cores, texto, posição), não uma imagem (via `ggplot2` + `rvg::dml()`, empacotado com `officer`). O ícone de câmera no canto do gráfico continua disponível para exportar PNG em alta resolução.
+Todo gráfico tem, logo abaixo, **Dados (CSV)** (dados brutos) e **Slide editável (PPTX)** — o gráfico como slide de PowerPoint totalmente editável, não uma imagem (`ggplot2` + `rvg::dml()` via `officer`). O ícone de câmera do gráfico continua exportando PNG em alta resolução.
 
 ## Fonte dos dados
 
-Os dados têm origem pública, disponibilizados pelo Ministério da Saúde na plataforma **SUS360**:
+Dados públicos do Ministério da Saúde, plataforma **SUS360**: [Componente Ambulatorial (OCI)](https://sus360.saude.gov.br/#painel/componente-ambulatorial) e [Cirurgias Eletivas](https://sus360.saude.gov.br/painel/cirurgias/).
 
-- [Componente Ambulatorial (OCI)](https://sus360.saude.gov.br/#painel/componente-ambulatorial)
-- [Cirurgias Eletivas](https://sus360.saude.gov.br/painel/cirurgias/)
+Este painel **não acessa o SUS360 diretamente**: consome os arquivos já processados pelos projetos irmãos `Cirurgia` e `OCI`, com três exceções mantidas manualmente (não vêm do SUS360 nem de script): `dados/Relacao_cirugiasROL.xlsx` (Código SIGTAP → Especialidade), `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (pagamentos e limite da Portaria 9.810).
 
-Este painel **não acessa o SUS360 diretamente**. Ele consome os arquivos já processados e padronizados pelos projetos irmãos `Cirurgia` e `OCI`, que fazem esse tratamento a partir das bases brutas — com três exceções mantidas manualmente dentro deste projeto (não vêm do SUS360 nem são geradas por script): `dados/Relacao_cirugiasROL.xlsx` (mapeamento Código SIGTAP → Especialidade, usado nos filtros de Especialidade/Procedimento), `dados/BaseValorliquidoPortaria9810.xlsx` (base de pagamentos da Portaria 9.810) e `dados/PORTARIA_9.810_UF.xlsx` (limite de repasse por UF da mesma portaria).
+A aba "Variação Cirurgias" é diferente: os 3 mapas (`.gpkg`) vêm de um terceiro projeto irmão, `Analise_Espacial/app_semaforo`, já prontos com geometria e variação % calculada — este painel só copia e lê.
 
 ## Como os dados chegam ao painel
 
 ```
-Cirurgia/resultados/02_monitoramento/tabelas/
-    serie_completa_{rol,total,pnrf}_*.csv
-    serie_completa_financeiro_{rol,total,pnrf}_*.csv
-    serie_anos_{rol,total,pnrf,pab}_*.csv
-    serie_anos_municipio_{rol,total,pnrf,pab}_*.csv
-Cirurgia/resultados/bases_processadas/
-    cirurgias_mensal_procedimento_rol_*.csv
-OCI/resultados/
-    planilha_OCI_UF_mes_*.xlsx
-    oci_mensal_especialidade_componente_{uf,municipio}.csv
+Cirurgia/resultados/02_monitoramento/tabelas/      serie_completa_*, serie_anos_*
+Cirurgia/resultados/bases_processadas/             cirurgias_mensal_procedimento_rol_*.csv
+OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv
+Analise_Espacial/app_semaforo/dados/               tab_br/tab_regiao/tab_municipio *.gpkg
                           │
                           ▼   sincronizado toda vez que o app abre (sessão nova)
-              Painel_Ciru_OCI/dados/processados/
+              Painel_Ciru_OCI/dados/processados/   (.gpkg ficam em processados/semaforo/)
 
 Painel_Ciru_OCI/dados/Relacao_cirugiasROL.xlsx           ← mantido manualmente, não sincroniza sozinho
 Painel_Ciru_OCI/dados/BaseValorliquidoPortaria9810.xlsx  ← mantido manualmente, não sincroniza sozinho
 Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente, não sincroniza sozinho
 ```
 
-`dados/processados/` é a principal fonte que o `app.R` lê (mais o `Relacao_cirugiasROL.xlsx` acima, que fica direto em `dados/`). A pasta `processados/` é ignorada pelo Git (não vai para o GitHub) e existe em dois estados:
+`dados/processados/` (ignorada pelo Git) é a principal fonte que o `app.R` lê:
 
-- **Local**: o app copia automaticamente a versão mais recente das planilhas dos projetos irmãos toda vez que abre — desde que `Cirurgia/` e `OCI/` estejam na mesma pasta pai deste projeto.
-- **Publicado no shinyapps.io**: como o servidor não tem acesso às pastas irmãs, ele usa a última cópia enviada junto no deploy.
+- **Local**: sincronizada automaticamente a cada abertura do app, desde que `Cirurgia/`, `OCI/` e `Analise_Espacial/` estejam na mesma pasta pai deste projeto.
+- **Publicado no shinyapps.io**: usa a última cópia enviada no deploy (sem acesso às pastas irmãs).
 
 ## Estrutura de pastas
 
@@ -71,6 +70,9 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
 1. GitHub_SAES/
 ├── Cirurgia/
 ├── OCI/
+├── Analise_Espacial/
+│   └── app_semaforo/
+│       └── dados/                             # tab_br/tab_regiao/tab_municipio *.gpkg
 └── Painel_Ciru_OCI/
     ├── app.R
     ├── dados/
@@ -78,6 +80,7 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
     │   ├── BaseValorliquidoPortaria9810.xlsx  # mantido manualmente, não ignorado pelo Git
     │   ├── PORTARIA_9.810_UF.xlsx             # mantido manualmente, não ignorado pelo Git
     │   └── processados/                       # gerado automaticamente, ignorado pelo Git
+    │       └── semaforo/                      # os 3 .gpkg copiados de Analise_Espacial
     ├── README.md
     ├── .gitignore
     └── .gitattributes
@@ -91,24 +94,18 @@ Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
 shiny::runApp()
 ```
 
-Na primeira execução, se os projetos `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R` no projeto Cirurgia, e `Monitoramento_oci_uf_2025_2026.R` no projeto OCI), os dados são sincronizados automaticamente para `dados/processados/`.
+Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R` e `Monitoramento_oci_uf_2025_2026.R`), os dados sincronizam automaticamente para `dados/processados/`.
 
-Depende do pacote `shinyWidgets` (dropdown de Região com múltipla escolha) e de `officer`, `ggplot2`, `scales` e `rvg` (exportação dos gráficos como slide editável em PowerPoint), além de shiny, bslib, plotly, DT, data.table, readxl e stringi.
+Pacotes: shiny, bslib, plotly, DT, data.table, readxl, stringi, `shinyWidgets` (dropdown de Região), `officer`/`ggplot2`/`scales`/`rvg` (exportação PPTX) e `sf`/`dplyr`/`shinycssloaders`/`writexl` (mapas e Excel da aba "Variação Cirurgias").
 
 ## Publicar / atualizar no shinyapps.io
 
 1. Rode os scripts de tratamento em `Cirurgia` e `OCI` para atualizar a competência mais recente;
 2. Abra e rode este app localmente uma vez, para sincronizar `dados/processados/`;
-3. No RStudio, com `app.R` aberto, clique em **Publish**. Se for a primeira vez numa conta nova (sem deploy anterior), use a seta ao lado do botão Publish → **Other Destination** para poder escolher a conta antes de criar o app — clicar direto no botão tende a reaproveitar a última conta/app usados;
-4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados para envio, mais `dados/Relacao_cirugiasROL.xlsx`, `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (nenhum desses três é gerado automaticamente, então só vão junto se forem marcados manualmente) — e nenhum `.RData`, se aparecer.
+3. No RStudio, com `app.R` aberto, clique em **Publish**. Numa conta nova (sem deploy anterior), use a seta ao lado do botão → **Other Destination** para escolher a conta antes de criar o app — clicar direto tende a reaproveitar a última conta/app usados;
+4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados — incluindo `processados/semaforo/` (3 `.gpkg`, ~23MB, fácil de esquecer) — mais os três xlsx manuais de `dados/` — e nenhum `.RData`, se aparecer.
 
-<<<<<<< Updated upstream
 Publicado em [`https://cginfo.shinyapps.io/Painel_Ciru_OCI/`](https://cginfo.shinyapps.io/Painel_Ciru_OCI/)
-=======
-Publicado em `https://felipecotrim.shinyapps.io/Monitoramento_Ciru_OCI/`.
-
-> O app fica com status **Sleeping** no painel do shinyapps.io sempre que passa um tempo sem acesso — é o comportamento normal do plano gratuito (economiza horas de servidor). Ao abrir o link, ele "acorda" em alguns segundos.
->>>>>>> Stashed changes
 
 ## Status
 
