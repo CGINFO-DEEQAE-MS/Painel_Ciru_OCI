@@ -102,7 +102,13 @@ Depende do pacote `shinyWidgets` (dropdown de Região com múltipla escolha) e d
 3. No RStudio, com `app.R` aberto, clique em **Publish**. Se for a primeira vez numa conta nova (sem deploy anterior), use a seta ao lado do botão Publish → **Other Destination** para poder escolher a conta antes de criar o app — clicar direto no botão tende a reaproveitar a última conta/app usados;
 4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados para envio, mais `dados/Relacao_cirugiasROL.xlsx`, `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (nenhum desses três é gerado automaticamente, então só vão junto se forem marcados manualmente) — e nenhum `.RData`, se aparecer.
 
+<<<<<<< Updated upstream
 Publicado em [`https://cginfo.shinyapps.io/Painel_Ciru_OCI/`](https://cginfo.shinyapps.io/Painel_Ciru_OCI/)
+=======
+Publicado em `https://felipecotrim.shinyapps.io/Monitoramento_Ciru_OCI/`.
+
+> O app fica com status **Sleeping** no painel do shinyapps.io sempre que passa um tempo sem acesso — é o comportamento normal do plano gratuito (economiza horas de servidor). Ao abrir o link, ele "acorda" em alguns segundos.
+>>>>>>> Stashed changes
 
 ## Status
 
