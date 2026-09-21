@@ -10,6 +10,10 @@ library(officer)
 library(ggplot2)
 library(scales)
 library(rvg)
+library(dplyr)
+library(sf)
+library(shinycssloaders)
+library(writexl)
 
 #### CAMINHOS ####
 
@@ -25,6 +29,10 @@ DIR_RESULT_OCI       <- DADOS_LOCAIS
 # Projetos irmãos (só existem em execução local; ausentes quando publicado).
 CIRURGIA_DIR_ORIGEM <- normalizePath(file.path("..", "Cirurgia"), mustWork = FALSE)
 OCI_DIR_ORIGEM      <- normalizePath(file.path("..", "OCI"), mustWork = FALSE)
+SEMAFORO_DIR_ORIGEM <- normalizePath(file.path("..", "Analise_Espacial", "app_semaforo", "dados"), mustWork = FALSE)
+
+DIR_SEMAFORO <- file.path(DADOS_LOCAIS, "semaforo")
+dir.create(DIR_SEMAFORO, recursive = TRUE, showWarnings = FALSE)
 
 MES_LABELS <- c(
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
@@ -922,18 +930,11 @@ grafico_comparacao_anos <- function(dados, titulo, metrica = "fisico") {
 
   d[, y_plot := get(coluna_y)]
   d[, ano_fct := factor(ano, levels = anos)]
-  d[, rotulo_dado := fmt_valor(y_plot)]
   d[, texto := paste0(ano, " — Mês: ", MES_LABELS[mes], "<br>", rotulo_eixo, ": ", fmt_valor(y_plot))]
-
-  destaque <- d[ano %in% c(2025, 2026)]
 
   ggplot(d, aes(x = mes, y = y_plot, colour = ano_fct, group = ano_fct)) +
     geom_line(linewidth = 1) +
     geom_point(aes(text = texto), size = 1.6) +
-    geom_text(
-      data = destaque, aes(label = rotulo_dado),
-      vjust = -1, size = 3, show.legend = FALSE
-    ) +
     scale_colour_manual(name = NULL, values = cores) +
     scale_x_continuous(breaks = 1:12, labels = MES_LABELS) +
     scale_y_continuous(labels = fmt_valor) +
@@ -1304,6 +1305,54 @@ grafico_portaria9810_limite <- function(dados, titulo) {
     theme(legend.position = "none", plot.title = element_text(face = "bold", size = 13))
 }
 
+#### SEMÁFORO CIRÚRGICO (mapas de variação 2025-2026, do projeto Analise_Espacial) ####
+
+# Copia os 3 .gpkg mais recentes do projeto irmão Analise_Espacial/app_semaforo
+# para dados/processados/semaforo — mesmo padrão de sincronizar_dados_locais().
+sincronizar_dados_semaforo <- function() {
+
+  if (!dir.exists(SEMAFORO_DIR_ORIGEM)) {
+    return(invisible(FALSE))
+  }
+
+  arquivos <- c(
+    localizar_arquivo(SEMAFORO_DIR_ORIGEM, "^tab_br.*\\.gpkg$"),
+    localizar_arquivo(SEMAFORO_DIR_ORIGEM, "^tab_regiao.*\\.gpkg$"),
+    localizar_arquivo(SEMAFORO_DIR_ORIGEM, "^tab_municipio.*\\.gpkg$")
+  )
+  arquivos <- arquivos[!is.na(arquivos)]
+
+  file.copy(arquivos, DIR_SEMAFORO, overwrite = TRUE)
+
+  invisible(TRUE)
+}
+
+carregar_gpkg_semaforo <- function(termo) {
+  arquivo <- localizar_arquivo(DIR_SEMAFORO, paste0("^tab_", termo, ".*\\.gpkg$"))
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+  st_read(arquivo, quiet = TRUE)
+}
+
+SEMAFORO_CORES_CATEGORIA <- c(
+  "Queda forte (≤ -10%)"                = "#D73027",
+  "Queda leve (-10% a 0%)"               = "#FC8D59",
+  "Estabilidade / leve alta (0% a 10%)"  = "#FFFFBF",
+  "Alta moderada (10% a 20%)"            = "#91CF60",
+  "Alta forte (≥ 20%)"                   = "#1A9850"
+)
+
+# Carregados uma única vez, compartilhados por todas as sessões (mapas de
+# referência, não mudam por usuário) — mesmo espírito de UF_REF acima.
+# Envolvido em tryCatch para não derrubar o painel inteiro (Cirurgias/OCI/
+# Portaria 9810) se os .gpkg estiverem ausentes ou corrompidos: nesse caso a
+# aba "Variação Cirurgias" mostra uma mensagem, e o resto do painel funciona normal.
+sincronizar_dados_semaforo()
+SEMAFORO_MAPA_BR <- tryCatch(carregar_gpkg_semaforo("br"), error = function(e) NULL)
+SEMAFORO_MAPA_REGIAO <- tryCatch(carregar_gpkg_semaforo("regiao"), error = function(e) NULL)
+SEMAFORO_MAPA_MUNICIPIO <- tryCatch(carregar_gpkg_semaforo("municipio"), error = function(e) NULL)
+
 #### UI ####
 
 # Bloco fixo com a origem dos dados, exibido abaixo dos filtros nas duas abas.
@@ -1475,6 +1524,117 @@ ui <- page_navbar(
           br(),
           h5("Classificação no último mês monitorado"),
           DTOutput("tabela_status_cirurgia")
+        )
+      )
+    )
+  ),
+
+  nav_panel(
+    "Variação Cirurgias",
+    div(
+      class = "p-3",
+      tags$head(tags$style(HTML(
+        "
+        .selectize-dropdown { z-index: 9999 !important; }
+        .selectize-control { z-index: 9999 !important; }
+        .shiny-input-container { z-index: auto !important; }
+        .card-body { overflow: visible !important; }
+        .card { overflow: visible !important; }
+        "
+      ))),
+      h4("Semáforo de Cirurgias — Variação de Procedimentos 2025-2026", class = "mb-4"),
+
+      card(
+        card_header(class = "bg-primary text-white", "Brasil - Variação por UF"),
+        plotOutput("semaforo_map_br", height = "600px") |> withSpinner(color = "#0dc5c1"),
+        layout_column_wrap(
+          width = 1 / 2,
+          card(
+            downloadButton(
+              "semaforo_download_ppt_br", "Baixar Mapa (PPT)",
+              class = "btn-warning btn-lg w-100", icon = icon("file-powerpoint")
+            ),
+            class = "text-center p-2"
+          ),
+          card(
+            downloadButton(
+              "semaforo_download_tabela_br", "Baixar Tabela (Excel)",
+              class = "btn-success btn-lg w-100", icon = icon("file-excel")
+            ),
+            class = "text-center p-2"
+          )
+        )
+      ),
+      br(),
+      card(
+        card_header(class = "bg-success text-white", "Regiões de Saúde - Variação"),
+        layout_column_wrap(
+          width = 1 / 3,
+          card(
+            selectInput("semaforo_uf_regiao", "Selecione a UF:", choices = NULL, selected = NULL),
+            class = "p-2"
+          )
+        ),
+        plotOutput("semaforo_map_regiao", height = "600px") |> withSpinner(color = "#0dc5c1"),
+        layout_column_wrap(
+          width = 1 / 2,
+          card(
+            downloadButton(
+              "semaforo_download_ppt_regiao", "Baixar Mapa (PPT - % e nomes)",
+              class = "btn-warning btn-lg w-100", icon = icon("file-powerpoint")
+            ),
+            class = "text-center p-2"
+          ),
+          card(
+            downloadButton(
+              "semaforo_download_tabela_regiao", "Baixar Tabela (Excel)",
+              class = "btn-success btn-lg w-100", icon = icon("file-excel")
+            ),
+            class = "text-center p-2"
+          )
+        )
+      ),
+      br(),
+      card(
+        card_header(class = "bg-info text-white", "Municípios - Variação"),
+        layout_column_wrap(
+          width = 1 / 3,
+          card(
+            selectInput("semaforo_uf_municipio", "Selecione a UF:", choices = NULL, selected = NULL),
+            class = "p-2"
+          ),
+          card(
+            selectInput(
+              "semaforo_municipio_selecionado", "Selecione o(s) Município(s):",
+              choices = NULL, selected = NULL, multiple = TRUE
+            ),
+            class = "p-2"
+          )
+        ),
+        plotOutput("semaforo_map_municipio", height = "600px") |> withSpinner(color = "#0dc5c1"),
+        layout_column_wrap(
+          width = 1 / 3,
+          card(
+            downloadButton(
+              "semaforo_download_ppt_municipio", "Baixar Mapa (PPT - %)",
+              class = "btn-warning btn-lg w-100", icon = icon("file-powerpoint")
+            ),
+            class = "text-center p-2"
+          ),
+          card(
+            downloadButton(
+              "semaforo_download_ppt_municipio_nome", "Baixar (PPT - % e nomes)",
+              class = "btn-warning btn-lg w-100", icon = icon("file-powerpoint")
+            ),
+            class = "text-center p-2"
+          ),
+          card(
+            downloadButton(
+              "semaforo_download_tabela_municipio", "Baixar Tabela (Excel)",
+              class = "btn-success btn-lg w-100", icon = icon("file-excel")
+            ),
+            class = "text-center p-2"
+          )
         )
       )
     )
@@ -2019,6 +2179,280 @@ server <- function(input, output, session) {
         backgroundColor = styleEqual(names(CORES_CLASSIFICACAO), CORES_CLASSIFICACAO)
       )
   })
+
+  ## ---- Semáforo Cirúrgico (mapas de variação, do projeto Analise_Espacial) ----
+
+  observe({
+    req(SEMAFORO_MAPA_REGIAO)
+    ufs <- SEMAFORO_MAPA_REGIAO %>% st_drop_geometry() %>% distinct(UF) %>% pull(UF) %>% sort()
+    updateSelectInput(session, "semaforo_uf_regiao", choices = c("Todas" = "", ufs), selected = "")
+  })
+
+  observe({
+    req(SEMAFORO_MAPA_MUNICIPIO)
+    ufs <- SEMAFORO_MAPA_MUNICIPIO %>% st_drop_geometry() %>% distinct(UF) %>% pull(UF) %>% sort()
+    updateSelectInput(session, "semaforo_uf_municipio", choices = c("Todas" = "", ufs), selected = "")
+  })
+
+  observe({
+    req(SEMAFORO_MAPA_MUNICIPIO)
+    uf_selecionada <- input$semaforo_uf_municipio
+
+    base <- SEMAFORO_MAPA_MUNICIPIO %>% st_drop_geometry()
+    if (isTRUE(uf_selecionada != "")) {
+      base <- base %>% filter(UF == uf_selecionada)
+    }
+
+    municipios <- base %>% distinct(municipio) %>% pull(municipio) %>% sort()
+    updateSelectInput(session, "semaforo_municipio_selecionado", choices = municipios, selected = NULL)
+  })
+
+  semaforo_dados_regiao_filtrados <- reactive({
+    req(SEMAFORO_MAPA_REGIAO)
+    dados_reg <- SEMAFORO_MAPA_REGIAO
+    if (!is.null(input$semaforo_uf_regiao) && input$semaforo_uf_regiao != "") {
+      dados_reg <- dados_reg %>% filter(UF == input$semaforo_uf_regiao)
+    }
+    dados_reg
+  })
+
+  semaforo_dados_municipio_filtrados <- reactive({
+    req(SEMAFORO_MAPA_MUNICIPIO)
+    dados_mun <- SEMAFORO_MAPA_MUNICIPIO
+    if (!is.null(input$semaforo_uf_municipio) && input$semaforo_uf_municipio != "") {
+      dados_mun <- dados_mun %>% filter(UF == input$semaforo_uf_municipio)
+    }
+    if (!is.null(input$semaforo_municipio_selecionado) && length(input$semaforo_municipio_selecionado) > 0) {
+      dados_mun <- dados_mun %>% filter(municipio %in% input$semaforo_municipio_selecionado)
+    }
+    dados_mun
+  })
+
+  criar_mapa_semaforo_br <- function() {
+    ggplot(SEMAFORO_MAPA_BR, aes(fill = categoria, geometry = geom)) +
+      geom_sf(color = "white", size = 0.3) +
+      geom_sf_text(aes(label = paste0(UF, "\n", round(dif_porcentagem, 1), "%")),
+                   size = 3, color = "black", fontface = "bold") +
+      scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+      theme_minimal() +
+      theme(
+        legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10), panel.grid = element_blank(),
+        axis.text = element_blank(), axis.title = element_blank(),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+  }
+
+  criar_mapa_semaforo_regiao_tela <- function() {
+    dados_reg <- semaforo_dados_regiao_filtrados()
+    if (nrow(dados_reg) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Nenhum dado disponível para a UF selecionada", size = 6, color = "red") + theme_void())
+    }
+    ggplot(dados_reg, aes(fill = categoria, geometry = geom)) +
+      geom_sf(color = "white", size = 0.3) +
+      geom_sf_text(aes(label = paste0(round(dif_porcentagem, 1), "%")),
+                   size = 2.5, color = "black", fontface = "bold") +
+      scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+      theme_minimal() +
+      theme(
+        legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10), panel.grid = element_blank(),
+        axis.text = element_blank(), axis.title = element_blank(),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+  }
+
+  criar_mapa_semaforo_regiao_download <- function() {
+    dados_reg <- semaforo_dados_regiao_filtrados()
+    if (nrow(dados_reg) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Nenhum dado disponível para a UF selecionada", size = 6, color = "red") + theme_void())
+    }
+    ggplot(dados_reg, aes(fill = categoria, geometry = geom)) +
+      geom_sf(color = "white", size = 0.3) +
+      geom_sf_text(aes(label = paste0(regiao_saude, "\n", round(dif_porcentagem, 1), "%")),
+                   size = 2.5, color = "black", fontface = "bold") +
+      scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+      theme_minimal() +
+      theme(
+        legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10), panel.grid = element_blank(),
+        axis.text = element_blank(), axis.title = element_blank(),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+  }
+
+  criar_mapa_semaforo_municipio_tela <- function() {
+    dados_mun <- semaforo_dados_municipio_filtrados()
+    if (nrow(dados_mun) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Nenhum dado disponível para os filtros selecionados", size = 6, color = "red") + theme_void())
+    }
+    if (nrow(dados_mun) > 20) {
+      ggplot(dados_mun, aes(fill = categoria, geometry = geom)) +
+        geom_sf(color = "white", size = 0.1) +
+        scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+        theme_minimal() +
+        theme(
+          legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+          legend.text = element_text(size = 10), panel.grid = element_blank(),
+          axis.text = element_blank(), axis.title = element_blank(),
+          plot.margin = margin(10, 10, 10, 10)
+        )
+    } else {
+      ggplot(dados_mun, aes(fill = categoria, geometry = geom)) +
+        geom_sf(color = "white", size = 0.2) +
+        geom_sf_text(aes(label = paste0(round(dif_porcentagem, 1), "%")),
+                     size = 2, color = "black", fontface = "bold") +
+        scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+        theme_minimal() +
+        theme(
+          legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+          legend.text = element_text(size = 10), panel.grid = element_blank(),
+          axis.text = element_blank(), axis.title = element_blank(),
+          plot.margin = margin(10, 10, 10, 10)
+        )
+    }
+  }
+
+  criar_mapa_semaforo_municipio_download <- function() {
+    dados_mun <- semaforo_dados_municipio_filtrados()
+    if (nrow(dados_mun) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Nenhum dado disponível para os filtros selecionados", size = 6, color = "red") + theme_void())
+    }
+    ggplot(dados_mun, aes(fill = categoria, geometry = geom)) +
+      geom_sf(color = "white", size = 0.2) +
+      geom_sf_text(aes(label = paste0(round(dif_porcentagem, 1), "%")),
+                   size = 2.5, color = "black", fontface = "bold") +
+      scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+      theme_minimal() +
+      theme(
+        legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10), panel.grid = element_blank(),
+        axis.text = element_blank(), axis.title = element_blank(),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+  }
+
+  criar_mapa_semaforo_municipio_download_nome <- function() {
+    dados_mun <- semaforo_dados_municipio_filtrados()
+    if (nrow(dados_mun) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Nenhum dado disponível para os filtros selecionados", size = 6, color = "red") + theme_void())
+    }
+    ggplot(dados_mun, aes(fill = categoria, geometry = geom)) +
+      geom_sf(color = "white", size = 0.2) +
+      geom_sf_text(aes(label = paste0(municipio, "\n", round(dif_porcentagem, 1), "%")),
+                   size = 2.5, color = "black", fontface = "bold") +
+      scale_fill_manual(values = SEMAFORO_CORES_CATEGORIA, name = "Variação") +
+      theme_minimal() +
+      theme(
+        legend.position = "right", legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10), panel.grid = element_blank(),
+        axis.text = element_blank(), axis.title = element_blank(),
+        plot.margin = margin(10, 10, 10, 10)
+      )
+  }
+
+  output$semaforo_map_br <- renderPlot({
+    validate(need(!is.null(SEMAFORO_MAPA_BR), "Mapa do Brasil não encontrado em dados/processados/semaforo."))
+    criar_mapa_semaforo_br()
+  })
+
+  output$semaforo_map_regiao <- renderPlot({
+    validate(need(!is.null(SEMAFORO_MAPA_REGIAO), "Mapa de regiões de saúde não encontrado em dados/processados/semaforo."))
+    criar_mapa_semaforo_regiao_tela()
+  })
+
+  output$semaforo_map_municipio <- renderPlot({
+    validate(need(!is.null(SEMAFORO_MAPA_MUNICIPIO), "Mapa de municípios não encontrado em dados/processados/semaforo."))
+    criar_mapa_semaforo_municipio_tela()
+  })
+
+  output$semaforo_download_ppt_br <- downloadHandler(
+    filename = function() paste0("mapa_br_", Sys.Date(), ".pptx"),
+    content = function(file) {
+      doc <- read_pptx()
+      doc <- add_slide(doc, layout = "Blank", master = "Office Theme")
+      doc <- ph_with(doc, value = rvg::dml(code = print(criar_mapa_semaforo_br()), width = 10, height = 7.5), location = ph_location_fullsize())
+      print(doc, target = file)
+    }
+  )
+
+  output$semaforo_download_tabela_br <- downloadHandler(
+    filename = function() paste0("tabela_br_", Sys.Date(), ".xlsx"),
+    content = function(file) {
+      SEMAFORO_MAPA_BR %>%
+        st_drop_geometry() %>%
+        select(UF, X2025, X2026, Variação....) %>%
+        rename("UF" = UF, "2025" = X2025, "2026" = X2026, "Variação (%)" = Variação....) %>%
+        writexl::write_xlsx(file)
+    }
+  )
+
+  output$semaforo_download_ppt_regiao <- downloadHandler(
+    filename = function() {
+      uf <- ifelse(is.null(input$semaforo_uf_regiao) || input$semaforo_uf_regiao == "", "BR", input$semaforo_uf_regiao)
+      paste0("mapa_regiao_", uf, "_", Sys.Date(), ".pptx")
+    },
+    content = function(file) {
+      doc <- read_pptx()
+      doc <- add_slide(doc, layout = "Blank", master = "Office Theme")
+      doc <- ph_with(doc, value = rvg::dml(code = print(criar_mapa_semaforo_regiao_download()), width = 10, height = 7.5), location = ph_location_fullsize())
+      print(doc, target = file)
+    }
+  )
+
+  output$semaforo_download_tabela_regiao <- downloadHandler(
+    filename = function() {
+      uf <- ifelse(is.null(input$semaforo_uf_regiao) || input$semaforo_uf_regiao == "", "BR", input$semaforo_uf_regiao)
+      paste0("tabela_regiao_", uf, "_", Sys.Date(), ".xlsx")
+    },
+    content = function(file) {
+      semaforo_dados_regiao_filtrados() %>%
+        st_drop_geometry() %>%
+        select(regiao_saude, X2025, X2026, Variação....) %>%
+        rename("Região" = regiao_saude, "2025" = X2025, "2026" = X2026, "Variação (%)" = Variação....) %>%
+        writexl::write_xlsx(file)
+    }
+  )
+
+  output$semaforo_download_ppt_municipio <- downloadHandler(
+    filename = function() {
+      uf <- ifelse(is.null(input$semaforo_uf_municipio) || input$semaforo_uf_municipio == "", "BR", input$semaforo_uf_municipio)
+      paste0("mapa_municipio_", uf, "_", Sys.Date(), ".pptx")
+    },
+    content = function(file) {
+      doc <- read_pptx()
+      doc <- add_slide(doc, layout = "Blank", master = "Office Theme")
+      doc <- ph_with(doc, value = rvg::dml(code = print(criar_mapa_semaforo_municipio_download()), width = 10, height = 7.5), location = ph_location_fullsize())
+      print(doc, target = file)
+    }
+  )
+
+  output$semaforo_download_ppt_municipio_nome <- downloadHandler(
+    filename = function() {
+      uf <- ifelse(is.null(input$semaforo_uf_municipio) || input$semaforo_uf_municipio == "", "BR", input$semaforo_uf_municipio)
+      paste0("mapa_municipio_nome_", uf, "_", Sys.Date(), ".pptx")
+    },
+    content = function(file) {
+      doc <- read_pptx()
+      doc <- add_slide(doc, layout = "Blank", master = "Office Theme")
+      doc <- ph_with(doc, value = rvg::dml(code = print(criar_mapa_semaforo_municipio_download_nome()), width = 10, height = 7.5), location = ph_location_fullsize())
+      print(doc, target = file)
+    }
+  )
+
+  output$semaforo_download_tabela_municipio <- downloadHandler(
+    filename = function() {
+      uf <- ifelse(is.null(input$semaforo_uf_municipio) || input$semaforo_uf_municipio == "", "BR", input$semaforo_uf_municipio)
+      paste0("tabela_municipio_", uf, "_", Sys.Date(), ".xlsx")
+    },
+    content = function(file) {
+      semaforo_dados_municipio_filtrados() %>%
+        st_drop_geometry() %>%
+        select(municipio, X2025, X2026, Variação....) %>%
+        rename("Município" = municipio, "2025" = X2025, "2026" = X2026, "Variação (%)" = Variação....) %>%
+        writexl::write_xlsx(file)
+    }
+  )
 
   ## ---- OCI ----
 
@@ -2680,7 +3114,11 @@ server <- function(input, output, session) {
     "grafico_oci_mensal_anos_csv", "grafico_oci_mensal_anos_pptx",
     "grafico_portaria9810_mensal_csv", "grafico_portaria9810_mensal_pptx",
     "grafico_portaria9810_programa_csv", "grafico_portaria9810_programa_pptx",
-    "grafico_portaria9810_limite_csv", "grafico_portaria9810_limite_pptx"
+    "grafico_portaria9810_limite_csv", "grafico_portaria9810_limite_pptx",
+    "semaforo_download_ppt_br", "semaforo_download_tabela_br",
+    "semaforo_download_ppt_regiao", "semaforo_download_tabela_regiao",
+    "semaforo_download_ppt_municipio", "semaforo_download_ppt_municipio_nome",
+    "semaforo_download_tabela_municipio"
   )
   for (id_botao in botoes_download) {
     outputOptions(output, id_botao, suspendWhenHidden = FALSE)
