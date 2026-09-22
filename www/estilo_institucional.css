@@ -1,0 +1,501 @@
+/* ============================================================
+   Painel_Ciru_OCI — tema institucional
+   Paleta: header #294158, ação/turquesa #18B997, azul #1769AA
+   ============================================================ */
+
+:root {
+  --cor-header: #173F67;
+  --cor-acao: #18B997;
+  --cor-azul: #1769AA;
+  --cor-positivo: #00875A;
+  --cor-negativo: #D64545;
+  --cor-texto: #152536;
+  --cor-texto-sec: #526477;
+  --cor-borda: #DDE4EA;
+  --cor-borda-input: #D7DEE5;
+  --cor-fundo: #F7F9FB;
+  --cor-card: #FFFFFF;
+  --cor-info-bg: #F1F6FA;
+}
+
+html, body {
+  background-color: var(--cor-fundo) !important;
+  color: var(--cor-texto);
+}
+
+/* Conteúdo centralizado, sem esticar demais em telas muito largas */
+.bslib-page-navbar > .tab-content,
+.bslib-page-navbar .container-fluid > .bslib-sidebar-layout {
+  max-width: 1700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---------------- Cabeçalho (navbar) ---------------- */
+
+.navbar {
+  background-color: var(--cor-header) !important;
+  min-height: 88px;
+}
+
+.navbar .navbar-brand {
+  display: flex;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* Logo fica no fim do .navbar-nav (empurrada pro extremo direito pelo
+   nav_spacer()), não mais em .navbar-brand — ver ui <- page_navbar(...).
+   Altura fixa (não 100%): o .navbar só tem min-height, sem altura travada,
+   então height:100% vira um loop (a imagem estica o container, que estica
+   a imagem) e a logo cresce sem parar. */
+.navbar-nav .logo-item {
+  display: flex;
+  align-items: center;
+  padding-left: 18px;
+}
+
+.logo-item img.logo-institucional {
+  height: 72px;
+  width: auto;
+}
+
+.navbar-brand .titulo-painel {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.navbar-brand .titulo-painel .titulo-principal {
+  font-size: 27px;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.navbar-brand .titulo-painel .titulo-org {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: #8FA1B3;
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+}
+
+.navbar-nav .nav-link {
+  color: #D7DEE5 !important;
+  font-size: 14.5px;
+  font-weight: 500;
+  padding-top: 1.6rem !important;
+  padding-bottom: 1.2rem !important;
+  border-bottom: 3px solid transparent;
+}
+
+.navbar-nav .nav-link:hover {
+  color: #FFFFFF !important;
+}
+
+.navbar-nav .nav-link.active {
+  color: #FFFFFF !important;
+  border-bottom: 3px solid var(--cor-acao);
+  font-weight: 600;
+}
+
+/* bslib emite marcação no estilo Bootstrap 3 (.navbar-header/.navbar-toggle/
+   .navbar-collapse) mesmo rodando Bootstrap 5 — sem uma classe
+   .navbar-expand-*, o CSS padrão do BS5 não sabe posicionar isso em flex,
+   então o layout (e o colapso responsivo) precisam ser montados aqui. */
+.navbar > .container-fluid {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 6px;
+}
+
+.navbar-header {
+  display: flex;
+  align-items: center;
+}
+
+.navbar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+.navbar-toggle .icon-bar {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background-color: #FFFFFF;
+  border-radius: 1px;
+}
+.navbar-toggle .icon-bar + .icon-bar {
+  margin-top: 4px;
+}
+
+.navbar-collapse {
+  flex-basis: 100%;
+}
+
+@media (min-width: 992px) {
+  .navbar > .container-fluid {
+    flex-wrap: nowrap;
+  }
+  .navbar-collapse {
+    flex-basis: auto;
+    margin-left: auto;
+  }
+  .navbar-collapse.collapse {
+    display: flex !important;
+  }
+}
+
+@media (max-width: 991px) {
+  .navbar-toggle {
+    display: inline-flex;
+  }
+  .navbar-collapse.collapse:not(.show) {
+    display: none !important;
+  }
+  .navbar-collapse.collapse.show {
+    display: block;
+    margin-top: 8px;
+  }
+  .navbar-nav {
+    flex-direction: column;
+  }
+  .navbar-nav .nav-link {
+    padding-top: 0.6rem !important;
+    padding-bottom: 0.6rem !important;
+    border-bottom: none;
+    border-left: 3px solid transparent;
+  }
+  .navbar-nav .nav-link.active {
+    border-bottom: none;
+    border-left: 3px solid var(--cor-acao);
+    padding-left: 10px;
+  }
+}
+
+/* ---------------- Sidebar ---------------- */
+
+.bslib-sidebar-layout > .sidebar {
+  background-color: #FFFFFF !important;
+  border-right: 1px solid var(--cor-borda);
+}
+
+.sidebar .sidebar-content {
+  padding: 20px 18px !important;
+}
+
+.sidebar-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--cor-borda);
+}
+
+.sidebar-cabecalho .titulo {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cor-texto);
+}
+
+.sidebar-cabecalho a.limpar-filtros {
+  font-size: 13px;
+  color: var(--cor-azul);
+  text-decoration: none;
+}
+.sidebar-cabecalho a.limpar-filtros:hover {
+  text-decoration: underline;
+}
+
+.sidebar label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--cor-texto);
+  margin-bottom: 6px;
+}
+
+.sidebar .form-control,
+.sidebar .selectize-input,
+.sidebar .bootstrap-select > .dropdown-toggle {
+  min-height: 40px;
+  border-radius: 7px !important;
+  border-color: var(--cor-borda-input) !important;
+  font-size: 14.5px;
+}
+
+.sidebar .form-group,
+.sidebar div.form-group {
+  margin-bottom: 18px;
+}
+
+/* A lista aberta de um selectInput/pickerInput precisa flutuar por cima do
+   restante da sidebar — sem isso, o campo seguinte (ex.: Município logo
+   abaixo de UF) pinta por cima da lista aberta, porque nenhum dos dois
+   tem contexto de empilhamento próprio (fluem na ordem normal do DOM).
+   Corrige só o .form-group que está com o dropdown aberto no momento —
+   não mexe no overflow da sidebar inteira (que ela pode continuar
+   precisando para rolar listas de filtro longas).
+   Importante: o selectize.js do Shiny bota a classe "dropdown-active" no
+   .selectize-input (a caixinha visível), não no .selectize-control (o
+   wrapper) — teria que ser :has(.selectize-input.dropdown-active). */
+.form-group:has(.selectize-input.dropdown-active) {
+  position: relative !important;
+  z-index: 10000 !important;
+}
+
+.selectize-control {
+  position: relative;
+}
+
+.selectize-dropdown,
+.bootstrap-select .dropdown-menu {
+  z-index: 10002 !important;
+}
+
+/* Caixa informativa consolidada, no fim da sidebar */
+.caixa-info-sidebar {
+  background-color: var(--cor-info-bg);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cor-texto-sec);
+  margin-top: 8px;
+}
+.caixa-info-sidebar .icone-info {
+  color: var(--cor-azul);
+  margin-right: 4px;
+}
+.caixa-info-sidebar p {
+  margin-bottom: 8px;
+}
+.caixa-info-sidebar p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------- Cabeçalho de conteúdo ---------------- */
+
+.cabecalho-conteudo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.cabecalho-conteudo .titulo-principal {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--cor-texto);
+  margin-bottom: 2px;
+}
+
+.cabecalho-conteudo .subtitulo {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--cor-texto-sec);
+}
+
+.card-data-atualizacao {
+  background-color: var(--cor-card);
+  border: 1px solid var(--cor-borda);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 12.5px;
+  color: var(--cor-texto-sec);
+  text-align: right;
+  white-space: nowrap;
+}
+.card-data-atualizacao .valor {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cor-texto);
+}
+
+/* ---------------- Filtros ativos ---------------- */
+
+.filtros-ativos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.filtros-ativos .rotulo {
+  font-size: 13px;
+  color: var(--cor-texto-sec);
+  margin-right: 2px;
+}
+
+.chip-filtro {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #EAF2F8;
+  color: var(--cor-azul);
+  border-radius: 999px;
+  padding: 4px 10px 4px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.chip-filtro a {
+  color: var(--cor-azul);
+  text-decoration: none;
+  font-weight: 700;
+  opacity: 0.7;
+}
+.chip-filtro a:hover {
+  opacity: 1;
+}
+
+.limpar-todos-chip {
+  font-size: 12.5px;
+  color: var(--cor-texto-sec);
+  text-decoration: underline;
+}
+
+/* ---------------- Cards de KPI ---------------- */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* Estrutura interna fixa: título e valor começam sempre nas mesmas
+   coordenadas verticais nos 4 cards, não importa quanta informação
+   complementar vem depois. justify-content: flex-start (não center) é o
+   que garante isso — grid items já esticam pra mesma altura por padrão
+   (align-items: stretch), então o card mais alto (mais linhas) define a
+   altura da fileira, e os outros só sobram com espaço vazio embaixo. */
+.kpi-card {
+  background-color: var(--cor-card);
+  border: 1px solid #E0E6EB;
+  border-radius: 11px;
+  padding: 24px 22px 20px;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.kpi-card .kpi-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cor-texto-sec);
+}
+
+.kpi-card .kpi-valor {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: #152536;
+  margin-top: 10px;
+}
+
+.kpi-card .kpi-nota {
+  font-size: 13px;
+  color: var(--cor-texto-sec);
+  margin-top: 8px;
+}
+.kpi-card .kpi-nota + .kpi-nota {
+  margin-top: 2px;
+}
+
+.kpi-divisor {
+  border: none;
+  border-top: 1px solid var(--cor-borda);
+  margin: 12px 0 8px;
+}
+
+.kpi-destaque-secundario {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.kpi-rodape {
+  font-size: 11.5px;
+  color: var(--cor-texto-sec);
+  margin-top: -12px;
+  margin-bottom: 20px;
+}
+
+.kpi-card .kpi-tendencia.positiva,
+.kpi-destaque-secundario.positiva {
+  color: var(--cor-positivo);
+}
+.kpi-card .kpi-tendencia.negativa,
+.kpi-destaque-secundario.negativa {
+  color: var(--cor-negativo);
+}
+
+/* Mesmo aviso do sombreado "Dados preliminares" dos gráficos, aplicado ao
+   card de KPI quando o valor mostrado ainda é de um mês não fechado. */
+.kpi-card .kpi-preliminar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #946200;
+  background-color: #FFF3E0;
+  border-radius: 999px;
+  padding: 2px 9px;
+  margin-top: 6px;
+}
+
+/* ---------------- Cabeçalhos de bloco dentro do conteúdo ---------------- */
+
+.titulo-grafico {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--cor-texto);
+}
+
+/* ---------------- Responsividade ---------------- */
+
+@media (max-width: 1279px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 991px) {
+  .navbar-brand .titulo-painel .titulo-org {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .logo-item img.logo-institucional {
+    height: 40px;
+  }
+  .navbar-brand .titulo-painel .titulo-principal {
+    font-size: 18px;
+  }
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .cabecalho-conteudo .titulo-principal {
+    font-size: 22px;
+  }
+  .card-data-atualizacao {
+    text-align: left;
+  }
+}
