@@ -43,6 +43,21 @@ MES_LABELS <- c(
 # da Portaria 9.810.
 MESES_ABREV_PT <- tolower(MES_LABELS)
 
+# Rótulo da "UF" que agrupa os registros de OCI sem UF de atendimento.
+OCI_UF_NAO_INFORMADA <- "NÃO INFORMADA"
+
+# Aba "Variação Cirurgias" (mapas do Analise_Espacial). Desligada por enquanto,
+# até os mapas serem regenerados com os meses mais recentes; TRUE religa a aba.
+MOSTRAR_VARIACAO_CIRURGIAS <- FALSE
+
+# Quantas das últimas competências de OCI ainda não fecharam (a competência
+# fechada mais recente é a última disponível menos este número de meses).
+OCI_MESES_PRELIMINARES <- 2L
+MESES_PT <- c(
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+)
+
 # Rótulos "Mês/AA" em português para eixos de data (o Plotly só formata
 # datas em inglês por padrão, sem carregar um locale de JS à parte).
 rotular_mes_ano_pt <- function(datas) {
@@ -111,11 +126,13 @@ ORDEM_COMPONENTES_OCI <- c(
 # componente/modalidade) — mantidas exatamente iguais nos gráficos do
 # painel que quebram por componente.
 CORES_COMPONENTE_OCI <- c(
-  "Total geral de OCI"    = "#185FA5",
-  "Componente Ambulatorial" = "#FDB528",
-  "Carretas"                = "#E4302B",
-  "Créditos Financeiros"    = "#8FD9C4",
-  "Equipes Volantes"        = "#9AD4E8"
+  # "Total geral" em cinza-escuro: o azul de Carretas (#0C3988) é escuro
+  # demais para conviver com um segundo azul na linha do total.
+  "Total geral de OCI"    = "#3D4B5A",
+  "Componente Ambulatorial" = "#F5C242",
+  "Carretas"                = "#0C3988",
+  "Créditos Financeiros"    = "#39DAC7",
+  "Equipes Volantes"        = "#60A6C4"
 )
 
 # Escolhas do filtro de componente na subaba "Série histórica OCI por
@@ -238,6 +255,27 @@ carregar_serie_municipio_cirurgia <- function(indicador) {
   dt <- fread(arquivo, encoding = "UTF-8")
   dt[, uf_atendimento := toupper(uf_atendimento)]
   dt[, municipio_atendimento := toupper(municipio_atendimento)]
+  dt[]
+}
+
+# Série por município e tipo de gestão (Estadual/Municipal/Dupla), usada só
+# em "Comparação Anos" quando o filtro de Gestão está ativo. Gerada pelo
+# script 10_series_gestao_comparacao_anos.R do projeto Cirurgia.
+carregar_serie_gestao_cirurgia <- function(indicador) {
+
+  arquivo <- localizar_arquivo(
+    DIR_TABELAS_CIRURGIA,
+    paste0("^serie_anos_municipio_gestao_", indicador, "_.*\\.csv$")
+  )
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, encoding = "UTF-8")
+  dt[, uf_atendimento := toupper(uf_atendimento)]
+  dt[, municipio_atendimento := toupper(municipio_atendimento)]
+  dt[, gestao := toupper(gestao)]
   dt[]
 }
 
@@ -366,18 +404,6 @@ carregar_limite_portaria9810 <- function() {
   dt[]
 }
 
-status_cirurgia <- function(serie) {
-
-  if (is.null(serie)) {
-    return(NULL)
-  }
-
-  s <- serie[!is.na(classificacao) & classificacao != ""]
-  s <- s[s[, .I[mes == max(mes)], by = uf_atendimento]$V1]
-  setorder(s, uf_atendimento)
-  s[, .(uf_atendimento, mes, quantidade, classificacao)]
-}
-
 carregar_serie_oci <- function() {
 
   arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^planilha_OCI_UF_mes_.*\\.xlsx$")
@@ -455,9 +481,16 @@ sincronizar_dados_locais <- function() {
   origem_cirurgia <- file.path(
     CIRURGIA_DIR_ORIGEM, "resultados", "02_monitoramento", "tabelas"
   )
+  # O projeto Cirurgia passou a separar as bases em bases_processadas/fisico
+  # e /financeiro; se a subpasta não existir, cai na pasta antiga.
   origem_cirurgia_bases <- file.path(
-    CIRURGIA_DIR_ORIGEM, "resultados", "bases_processadas"
+    CIRURGIA_DIR_ORIGEM, "resultados", "bases_processadas", "fisico"
   )
+  if (!dir.exists(origem_cirurgia_bases)) {
+    origem_cirurgia_bases <- file.path(
+      CIRURGIA_DIR_ORIGEM, "resultados", "bases_processadas"
+    )
+  }
   origem_oci <- file.path(OCI_DIR_ORIGEM, "resultados")
 
   arquivos <- c(
@@ -475,6 +508,10 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_total_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_pab_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_rol_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_total_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_pnrf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_pab_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia_bases, "^cirurgias_mensal_procedimento_rol_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
@@ -482,7 +519,28 @@ sincronizar_dados_locais <- function() {
   )
   arquivos <- arquivos[!is.na(arquivos)]
 
+  # Remove versões antigas das séries de cirurgia (ex.: ..._base_2022_2024.csv
+  # quando já existe ..._base_2022_2025.csv) para não irem parar no deploy.
+  obsoletos <- list.files(DADOS_LOCAIS, pattern = "^serie_(completa|anos).*\\.csv$", full.names = TRUE)
+  prefixo <- function(x) sub("_[0-9]{4}_.*$", "", basename(x))
+  obsoletos <- obsoletos[
+    prefixo(obsoletos) %in% prefixo(arquivos) &
+      !basename(obsoletos) %in% basename(arquivos)
+  ]
+  if (length(obsoletos) > 0L) file.remove(obsoletos)
+
   file.copy(arquivos, DADOS_LOCAIS, overwrite = TRUE)
+
+  # Data em que as séries de Cirurgia foram geradas no projeto de origem —
+  # gravada num arquivo próprio porque a data de modificação do arquivo não
+  # sobrevive ao deploy no shinyapps.io.
+  serie_referencia <- localizar_arquivo(origem_cirurgia, "^serie_anos_total_.*\\.csv$")
+  if (!is.na(serie_referencia)) {
+    writeLines(
+      format(file.info(serie_referencia)$mtime, "%Y-%m-%d"),
+      file.path(DADOS_LOCAIS, "atualizacao_cirurgia.txt")
+    )
+  }
 
   invisible(TRUE)
 }
@@ -504,6 +562,10 @@ carregar_tudo <- function() {
     cirurgia_municipio_total = carregar_serie_municipio_cirurgia("total"),
     cirurgia_municipio_pnrf = carregar_serie_municipio_cirurgia("pnrf"),
     cirurgia_municipio_pab = carregar_serie_municipio_cirurgia("pab"),
+    cirurgia_gestao_rol = carregar_serie_gestao_cirurgia("rol"),
+    cirurgia_gestao_total = carregar_serie_gestao_cirurgia("total"),
+    cirurgia_gestao_pnrf = carregar_serie_gestao_cirurgia("pnrf"),
+    cirurgia_gestao_pab = carregar_serie_gestao_cirurgia("pab"),
     cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
     mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
     portaria9810 = carregar_portaria9810(),
@@ -610,9 +672,11 @@ filtrar_procedimento_rol <- function(serie_proc, mapa, uf_sel, regioes, especial
 }
 
 # Mesmos anos usados no script 02_monitoramento_diagrama_controle.R do
-# projeto Cirurgia (base 2022-2024, comparação 2025, monitoramento 2026).
+# projeto Cirurgia (base 2022-2025, comparação 2025, monitoramento 2026). O
+# ano de comparação (2025) agora também entra na série histórica que gera as
+# faixas de quartil — mesma regra do script de origem.
 DIAGRAMA_ANO_INICIAL_BASE <- 2022L
-DIAGRAMA_ANO_FINAL_BASE <- 2024L
+DIAGRAMA_ANO_FINAL_BASE <- 2025L
 DIAGRAMA_ANO_COMPARACAO <- 2025L
 DIAGRAMA_ANO_MONITORAMENTO <- 2026L
 
@@ -819,7 +883,10 @@ limpar_legenda_plotly <- function(p) {
   p
 }
 
-grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo, metrica = "fisico") {
+# Só o ano de monitoramento é desenhado: o ano anterior (2025) entra na faixa
+# histórica (base 2022-2025), como no script 02 do projeto Cirurgia, e não
+# mais como linha separada.
+grafico_cirurgia <- function(dados_uf, ano_monitoramento, titulo, metrica = "fisico") {
 
   d <- dados_uf[order(ano, mes)]
 
@@ -828,7 +895,6 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
   )
   setorder(faixa, mes)
 
-  comp <- d[ano == ano_comparacao]
   moni <- d[ano == ano_monitoramento]
 
   # A classificação (Esperado/Acima do esperado/...) foi desenhada para
@@ -840,13 +906,11 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
   rotulo_eixo <- if (metrica == "financeiro") "Valor (R$)" else "Quantidade"
   fmt_valor   <- if (metrica == "financeiro") label_pt_moeda else label_pt_num
 
-  comp[, texto := paste0("Mês: ", MES_LABELS[mes], "<br>", rotulo_eixo, ": ", fmt_valor(quantidade))]
   moni[, texto := paste0(
     "Mês: ", MES_LABELS[mes], "<br>", rotulo_eixo, ": ", fmt_valor(quantidade),
     if (com_classificacao) paste0("<br>", classificacao) else ""
   )]
 
-  rotulo_serie_comp <- paste0("Produção ", ano_comparacao)
   rotulo_serie_moni <- paste0("Produção ", ano_monitoramento)
 
   # Todas as cores (as duas linhas de produção + os níveis de classificação)
@@ -855,7 +919,6 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
   # evita o ggnewscale, que o ggplotly (usado na tela) não converte bem —
   # com ele, as camadas anteriores à segunda escala somem na versão
   # interativa (mesmo aparecendo certo no PPTX, que não passa pelo ggplotly).
-  comp[, serie := rotulo_serie_comp]
   moni[, serie := rotulo_serie_moni]
 
   niveis_classificacao <- c(
@@ -865,14 +928,11 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
 
   if (com_classificacao) {
     moni[, classificacao := factor(classificacao, levels = niveis_classificacao)]
-    valores_cor <- c(
-      setNames(c("#003366", "black"), c(rotulo_serie_comp, rotulo_serie_moni)),
-      CORES_CLASSIFICACAO
-    )
-    quebras_legenda <- c(rotulo_serie_comp, rotulo_serie_moni, niveis_classificacao)
+    valores_cor <- c(setNames("black", rotulo_serie_moni), CORES_CLASSIFICACAO)
+    quebras_legenda <- c(rotulo_serie_moni, niveis_classificacao)
   } else {
-    valores_cor <- setNames(c("#003366", "black"), c(rotulo_serie_comp, rotulo_serie_moni))
-    quebras_legenda <- c(rotulo_serie_comp, rotulo_serie_moni)
+    valores_cor <- setNames("black", rotulo_serie_moni)
+    quebras_legenda <- rotulo_serie_moni
   }
 
   p <- ggplot() +
@@ -893,14 +953,6 @@ grafico_cirurgia <- function(dados_uf, ano_comparacao, ano_monitoramento, titulo
       colour = "black", linewidth = 0.6
     ) +
     scale_linetype_manual(name = NULL, values = c("Mediana histórica" = "dashed")) +
-    geom_line(
-      data = comp, aes(x = mes, y = quantidade, colour = serie, group = serie),
-      linewidth = 1.1
-    ) +
-    geom_point(
-      data = comp, aes(x = mes, y = quantidade, colour = serie, text = texto),
-      size = 1.6
-    ) +
     geom_line(
       data = moni, aes(x = mes, y = quantidade, colour = serie, group = serie),
       linewidth = 1.1
@@ -1036,21 +1088,16 @@ grafico_oci_componente_ano <- function(dados, titulo) {
   d[, ano_fct := factor(as.character(ANO), levels = ordem_ano)]
   d[, texto := paste0(COMPONENTE, "<br>", ANO, "<br>OCI: ", label_pt_num(OCI))]
 
-  totais_ano <- d[, .(total = sum(OCI, na.rm = TRUE)), by = .(ano_fct)]
-  totais_ano[, rotulo_total := label_pt_num(total)]
-
+  # Os valores ficam na tabela logo abaixo do gráfico (e no tooltip), não
+  # mais como rótulo fixo na ponta das barras.
   ggplot(d, aes(x = ano_fct, y = OCI, fill = COMPONENTE, text = texto)) +
     geom_col(width = 0.65) +
-    geom_text(
-      data = totais_ano, aes(x = ano_fct, y = total, label = rotulo_total),
-      inherit.aes = FALSE, hjust = -0.1, size = 3.6, colour = "#12283D"
-    ) +
-    scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI) +
-    scale_y_continuous(labels = label_pt_num, expand = expansion(mult = c(0, 0.12))) +
+    scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI, breaks = ORDEM_COMPONENTES_OCI) +
+    scale_y_continuous(labels = label_pt_num, expand = expansion(mult = c(0, 0.02))) +
     coord_flip() +
     labs(title = titulo, x = NULL, y = "OCI realizadas") +
     theme_minimal(base_size = 12) +
-    theme(legend.position = "none", plot.title = element_text(face = "bold", size = 13))
+    theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 13))
 }
 
 # Mesmo esquema de colunas empilhadas por componente/modalidade, mas por
@@ -1144,8 +1191,9 @@ grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) 
 }
 
 # Colunas empilhadas por especialidade e componente/modalidade — total
-# acumulado do período filtrado, ordenado por total decrescente e com
-# rótulo de valor em cada segmento, igual ao gráfico de referência.
+# acumulado do período filtrado, ordenado por total decrescente. Sem rótulo
+# fixo nos segmentos: os valores ficam no tooltip e nas tabelas abaixo do
+# gráfico.
 grafico_oci_especialidade_componente <- function(dados, titulo) {
 
   d <- dados[, .(OCI = sum(OCI, na.rm = TRUE)), by = .(ESPECIALIDADE, COMPONENTE)]
@@ -1157,28 +1205,61 @@ grafico_oci_especialidade_componente <- function(dados, titulo) {
 
   # Ordem de empilhamento (de baixo para cima), igual ao gráfico de referência.
   ordem_pilha <- c("Carretas", "Componente Ambulatorial", "Créditos Financeiros", "Equipes Volantes")
-  cor_texto_pilha <- c(
-    "Carretas" = "white", "Componente Ambulatorial" = "#12283D",
-    "Créditos Financeiros" = "#12283D", "Equipes Volantes" = "#12283D"
-  )
 
   d <- d[COMPONENTE %in% ordem_pilha]
   d[, COMPONENTE := factor(as.character(COMPONENTE), levels = rev(ordem_pilha))]
-  d[, cor_label := cor_texto_pilha[as.character(COMPONENTE)]]
-  d[, rotulo := label_pt_num(OCI)]
   d[, texto := paste0(COMPONENTE, "<br>", ESPECIALIDADE, "<br>OCI: ", label_pt_num(OCI))]
 
   ggplot(d, aes(x = ESPECIALIDADE, y = OCI, fill = COMPONENTE, text = texto)) +
     geom_col(width = 0.7) +
-    geom_text(
-      aes(label = rotulo, colour = I(cor_label)),
-      position = position_stack(vjust = 0.5), size = 3.2
-    ) +
     scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI, breaks = ordem_pilha) +
     scale_y_continuous(labels = label_pt_num) +
     labs(title = titulo, x = NULL, y = "OCI realizadas") +
     theme_minimal(base_size = 12) +
     theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 13))
+}
+
+# Tabela por especialidade x componente (com total por linha e uma linha de
+# total geral) para acompanhar o gráfico de colunas empilhadas. `coluna` é
+# "OCI" (físico) ou "VALOR" (financeiro, em R$).
+tabela_oci_especialidade_componente <- function(dados, coluna, moeda = FALSE) {
+
+  d <- dados[
+    COMPONENTE %in% ORDEM_COMPONENTES_OCI,
+    .(valor = sum(get(coluna), na.rm = TRUE)), by = .(ESPECIALIDADE, COMPONENTE)
+  ]
+
+  larga <- dcast(d, ESPECIALIDADE ~ as.character(COMPONENTE), value.var = "valor", fill = 0)
+  colunas <- intersect(ORDEM_COMPONENTES_OCI, names(larga))
+  larga[, Total := rowSums(.SD), .SDcols = colunas]
+  setorder(larga, -Total)
+
+  totais <- larga[, lapply(.SD, sum), .SDcols = c(colunas, "Total")]
+  totais[, ESPECIALIDADE := "Total"]
+  larga <- rbind(larga[, ESPECIALIDADE := as.character(ESPECIALIDADE)], totais, use.names = TRUE)
+  setnames(larga, "ESPECIALIDADE", "Especialidade")
+  setcolorder(larga, c("Especialidade", colunas, "Total"))
+
+  tabela <- datatable(
+    larga,
+    rownames = FALSE,
+    selection = "none",
+    fillContainer = FALSE,
+    height = "auto",
+    options = list(dom = "t", ordering = FALSE, paging = FALSE)
+  )
+
+  tabela <- if (moeda) {
+    formatCurrency(tabela, c(colunas, "Total"), currency = "R$ ", interval = 3, mark = ".", digits = 0)
+  } else {
+    formatRound(tabela, c(colunas, "Total"), digits = 0, mark = ".", interval = 3)
+  }
+
+  formatStyle(
+    tabela, c("Especialidade", colunas, "Total"),
+    valueColumns = "Especialidade",
+    fontWeight = styleEqual("Total", "bold")
+  )
 }
 
 grafico_oci_fisico_especialidade <- function(dados, titulo) {
@@ -1365,6 +1446,15 @@ SEMAFORO_CORES_CATEGORIA <- c(
 # aba "Variação Cirurgias" mostra uma mensagem, e o resto do painel funciona normal.
 sincronizar_dados_semaforo()
 SEMAFORO_MAPA_BR <- tryCatch(carregar_gpkg_semaforo("br"), error = function(e) NULL)
+
+# Data em que os mapas foram gerados: o script do Analise_Espacial grava
+# Sys.Date() no nome do arquivo (tab_br2026-08-03.gpkg). Sem data no nome,
+# cai na data de modificação do arquivo.
+SEMAFORO_DATA_GERACAO <- tryCatch({
+  arquivo <- localizar_arquivo(DIR_SEMAFORO, "^tab_br.*\\.gpkg$")
+  data_nome <- regmatches(basename(arquivo), regexpr("[0-9]{4}-[0-9]{2}-[0-9]{2}", basename(arquivo)))
+  if (length(data_nome) == 1L) as.Date(data_nome) else as.Date(file.info(arquivo)$mtime)
+}, error = function(e) as.Date(NA))
 SEMAFORO_MAPA_REGIAO <- tryCatch(carregar_gpkg_semaforo("regiao"), error = function(e) NULL)
 SEMAFORO_MAPA_MUNICIPIO <- tryCatch(carregar_gpkg_semaforo("municipio"), error = function(e) NULL)
 
@@ -1444,7 +1534,7 @@ caixa_info_sidebar <- function(...) {
 
 # Cabeçalho do conteúdo de cada aba: título + subtítulo à esquerda, card
 # pequeno com a data de atualização à direita (quando output_data_id existe).
-cabecalho_conteudo <- function(titulo, subtitulo, output_data_id = NULL) {
+cabecalho_conteudo <- function(titulo, subtitulo, output_data_id = NULL, output_atualizacao_id = NULL) {
   div(
     class = "cabecalho-conteudo",
     div(
@@ -1455,7 +1545,10 @@ cabecalho_conteudo <- function(titulo, subtitulo, output_data_id = NULL) {
       div(
         class = "card-data-atualizacao",
         "Dados até a competência", br(),
-        span(class = "valor", textOutput(output_data_id, inline = TRUE))
+        span(class = "valor", textOutput(output_data_id, inline = TRUE)),
+        if (!is.null(output_atualizacao_id)) {
+          div(class = "atualizacao", textOutput(output_atualizacao_id, inline = TRUE))
+        }
       )
     }
   )
@@ -1489,21 +1582,6 @@ kpi_linha <- function(texto, classe = NULL) {
 }
 
 kpi_grid <- function(...) div(class = "kpi-grid", ...)
-
-# Linha de chips com os filtros atualmente ativos (renderizada via uiOutput
-# no server, que monta a lista dinamicamente a partir dos inputs da aba).
-filtros_ativos_ui <- function(output_id) {
-  uiOutput(output_id)
-}
-
-# Um chip individual de filtro ativo, com "x" para limpar só aquele filtro.
-chip_filtro <- function(texto, limpar_id) {
-  span(
-    class = "chip-filtro",
-    texto,
-    actionLink(limpar_id, HTML("&times;"))
-  )
-}
 
 ui <- page_navbar(
   title = div(
@@ -1581,6 +1659,11 @@ ui <- page_navbar(
           choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
         ),
         selectInput(
+          "gestao_cirurgia", "Gestão",
+          choices = c("Todas" = "Todas", "Estadual" = "ESTADUAL", "Municipal" = "MUNICIPAL", "Dupla" = "DUPLA"),
+          selected = "Todas"
+        ),
+        selectInput(
           "especialidade_cirurgia", "Especialidade",
           choices = c("Todas" = "Todas"), selected = "Todas"
         ),
@@ -1591,7 +1674,8 @@ ui <- page_navbar(
         ),
         caixa_info_sidebar(
           "PAB vale só para \"Comparação Anos\" (sem valor financeiro) — substitui o indicador acima enquanto marcado.",
-          "Filtro de Município vale só para \"Comparação Anos\" — o Diagrama de monitoramento e a Tabela continuam por UF/Região.",
+          "Filtros de Município e Gestão valem só para \"Comparação Anos\" — o Diagrama de monitoramento continua por UF/Região, sem separar por gestão.",
+          "Gestão = gestão do estabelecimento. Gestão dupla não tem valor financeiro (só Físico). Gestão não se combina com Especialidade/Procedimento.",
           "Indicador ROL — Físico: Especialidade vale para \"Comparação Anos\" e \"Diagrama de monitoramento\"; Procedimento só para \"Comparação Anos\"."
         ),
         info_fonte_dados()
@@ -1599,9 +1683,9 @@ ui <- page_navbar(
       cabecalho_conteudo(
         "Cirurgias eletivas",
         textOutput("subtitulo_cirurgia", inline = TRUE),
-        "data_atualizacao_cirurgia"
+        "data_atualizacao_cirurgia",
+        "data_processamento_cirurgia"
       ),
-      filtros_ativos_ui("filtros_ativos_cirurgia"),
       kpi_grid(
         kpi_card(textOutput("kpi_cirurgia_titulo1", inline = TRUE), "kpi_cirurgia_valor1"),
         kpi_card(textOutput("kpi_cirurgia_titulo2", inline = TRUE), "kpi_cirurgia_valor2"),
@@ -1633,18 +1717,12 @@ ui <- page_navbar(
           ),
           plotlyOutput("grafico_cirurgia", height = "62vh"),
           barra_downloads("grafico_cirurgia")
-        ),
-        tabPanel(
-          "Tabela",
-          br(),
-          h5("Classificação no último mês monitorado"),
-          DTOutput("tabela_status_cirurgia")
         )
       )
     )
   ),
 
-  nav_panel(
+  if (MOSTRAR_VARIACAO_CIRURGIAS) nav_panel(
     "Variação Cirurgias",
     div(
       class = "p-3",
@@ -1657,7 +1735,10 @@ ui <- page_navbar(
         .card { overflow: visible !important; }
         "
       ))),
-      cabecalho_conteudo("Variação Cirurgias", "Variação percentual de procedimentos — 2025 vs. 2026, por UF"),
+      cabecalho_conteudo(
+        "Variação Cirurgias", textOutput("subtitulo_semaforo", inline = TRUE),
+        "data_atualizacao_semaforo", "data_processamento_semaforo"
+      ),
       kpi_grid(
         kpi_card("UFs em alta", "kpi_semaforo_alta", "kpi_semaforo_alta_linha"),
         kpi_card("UFs em queda", "kpi_semaforo_queda", "kpi_semaforo_queda_linha"),
@@ -1777,18 +1858,19 @@ ui <- page_navbar(
           choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
         ),
         caixa_info_sidebar(
-          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\"."
+          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\".",
+          "Registros sem UF de atendimento (contatos do CMD) entram só no total Brasil, com as 5 regiões marcadas."
         ),
         info_fonte_dados_oci()
       ),
       cabecalho_conteudo("OCI realizadas", textOutput("subtitulo_oci", inline = TRUE)),
-      filtros_ativos_ui("filtros_ativos_oci"),
       kpi_grid(
-        kpi_card("OCI realizadas no ano mais recente", "kpi_oci_producao_ano", "kpi_oci_producao_ano_linha"),
-        kpi_card("Maior produção mensal", "kpi_oci_maior_mes", "kpi_oci_maior_mes_linha"),
-        kpi_card("Última competência", "kpi_oci_ultima_comp", "kpi_oci_ultima_comp_linha"),
-        kpi_card("Variação no período", "kpi_oci_variacao", "kpi_oci_variacao_linha")
+        kpi_card(textOutput("kpi_oci_titulo1", inline = TRUE), "kpi_oci_valor1", "kpi_oci_linha1"),
+        kpi_card(textOutput("kpi_oci_titulo2", inline = TRUE), "kpi_oci_valor2", "kpi_oci_linha2"),
+        kpi_card("OCI total", "kpi_oci_valor3", "kpi_oci_linha3"),
+        kpi_card("Taxa de expansão anual", "kpi_oci_valor4", "kpi_oci_linha4")
       ),
+      div(class = "kpi-rodape", textOutput("kpi_oci_rodape", inline = TRUE)),
       tabsetPanel(
         id = "subaba_oci",
         type = "tabs",
@@ -1800,8 +1882,9 @@ ui <- page_navbar(
           barra_downloads("grafico_oci_componente"),
           br(),
           h5("OCI por componente — por ano"),
-          plotlyOutput("grafico_oci_componente_ano", height = "26vh"),
+          plotlyOutput("grafico_oci_componente_ano", height = "38vh"),
           barra_downloads("grafico_oci_componente_ano"),
+          DTOutput("tabela_oci_componente_ano", height = "auto"),
           br(),
           h5("OCI por componente — por mês de atendimento"),
           plotlyOutput("grafico_oci_componente_mes", height = "40vh"),
@@ -1836,7 +1919,11 @@ ui <- page_navbar(
             choices = ANOS_OCI, selected = ANOS_OCI, inline = TRUE
           ),
           plotlyOutput("grafico_oci_especialidade_componente", height = "50vh"),
-          barra_downloads("grafico_oci_especialidade_componente")
+          barra_downloads("grafico_oci_especialidade_componente"),
+          h6("Físico — OCI realizadas", style = "margin-top: 16px;"),
+          DTOutput("tabela_oci_especialidade_componente_fisico", height = "auto"),
+          h6("Financeiro — valor federal de referência (R$)", style = "margin-top: 16px;"),
+          DTOutput("tabela_oci_especialidade_componente_financeiro", height = "auto")
         ),
         tabPanel(
           "Comparativos",
@@ -1863,7 +1950,7 @@ ui <- page_navbar(
           plotlyOutput("grafico_oci_fisico_especialidade", height = "40vh"),
           barra_downloads("grafico_oci_fisico_especialidade"),
           br(),
-          h5("Financeiro por especialidade (R$)"),
+          h5("Financeiro por especialidade — valor federal de referência (R$)"),
           DTOutput("tabela_oci_financeiro"),
           br(),
           h5("Produção mensal — 2025 vs 2026"),
@@ -1899,7 +1986,6 @@ ui <- page_navbar(
         )
       ),
       cabecalho_conteudo("Pagamento Portaria 9810", textOutput("subtitulo_portaria9810", inline = TRUE)),
-      filtros_ativos_ui("filtros_ativos_portaria9810"),
       kpi_grid(
         kpi_card("Valor pago no período", "kpi_portaria_valor_periodo", "kpi_portaria_valor_periodo_linha"),
         kpi_card("Maior pagamento mensal", "kpi_portaria_maior_mes", "kpi_portaria_maior_mes_linha"),
@@ -1956,24 +2042,36 @@ server <- function(input, output, session) {
 
   dados <- reactiveVal(carregar_tudo())
 
-  # Mesmo texto de antes (data da competência mais recente na base de OCI,
-  # usada como referência de atualização do painel todo) — só não aparece
-  # mais num único lugar do header escuro, e sim no card de cada aba que o
-  # usa (Cirurgias e Variação Cirurgias; OCI já tem sua própria nota de
-  # fonte, Portaria 9810 não se aplica).
+  # Card do cabeçalho de Cirurgias: última competência com produção na série
+  # de Cirurgias (não a da OCI) e a data em que essa base foi gerada.
   texto_data_atualizacao <- reactive({
-    serie_oci <- dados()$oci_serie
-    if (is.null(serie_oci)) {
+    serie <- dados()$cirurgia_anos_total
+    if (is.null(serie)) {
       return("")
     }
-    format(max(serie_oci$competencia, na.rm = TRUE), "%m/%Y")
+    ultima <- serie[uf_atendimento == "BRASIL" & quantidade > 0][order(ano, mes)][.N]
+    sprintf("%02d/%d", ultima$mes, ultima$ano)
   })
   output$data_atualizacao_cirurgia <- renderText({ texto_data_atualizacao() })
+
+  output$data_processamento_cirurgia <- renderText({
+    dados()
+    arquivo <- file.path(DADOS_LOCAIS, "atualizacao_cirurgia.txt")
+    data <- if (file.exists(arquivo)) {
+      suppressWarnings(as.Date(readLines(arquivo, n = 1L, warn = FALSE)))
+    } else {
+      as.Date(NA)
+    }
+    if (is.na(data)) {
+      return("")
+    }
+    paste0("Atualizado em ", MESES_PT[as.integer(format(data, "%m"))], " de ", format(data, "%Y"))
+  })
 
   ## ---- Cirurgias ----
 
   # Física, independente do toggle Físico/Financeiro do Diagrama — usada pela
-  # cascata de UF e pela Tabela de status (que não segue esse toggle).
+  # cascata de UF (que não segue esse toggle).
   serie_cirurgia_indicador_fisica <- reactive({
     req(input$indicador_cirurgia)
     dados()[[paste0("cirurgia_", input$indicador_cirurgia)]]
@@ -2048,7 +2146,6 @@ server <- function(input, output, session) {
 
     dados_uf <- dados_diagrama_cirurgia()
 
-    ano_comparacao   <- min(dados_uf$ano)
     ano_monitoramento <- max(dados_uf$ano)
 
     rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]]
@@ -2062,7 +2159,7 @@ server <- function(input, output, session) {
     }
 
     grafico_cirurgia(
-      dados_uf, ano_comparacao, ano_monitoramento,
+      dados_uf, ano_monitoramento,
       titulo = paste0(rotulo_indicador, " — ", rotulo_uf, sufixo_especialidade),
       metrica = input$metrica_cirurgia_diagrama
     )
@@ -2163,6 +2260,7 @@ server <- function(input, output, session) {
     especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
     procedimentos_sel <- input$procedimento_cirurgia
     filtro_procedimento_ativo <- especialidade_sel != "Todas" || length(procedimentos_sel) > 0
+    gestao_ativa <- isTRUE(!is.null(input$gestao_cirurgia) && input$gestao_cirurgia != "Todas")
 
     if (filtro_procedimento_ativo) {
 
@@ -2173,6 +2271,10 @@ server <- function(input, output, session) {
       validate(need(
         input$metrica_cirurgia_anos == "fisico",
         "Não há valor financeiro — troque para \"Físico\" para usar os filtros de Especialidade/Procedimento."
+      ))
+      validate(need(
+        !gestao_ativa,
+        "O filtro de Gestão não se combina com Especialidade/Procedimento. Volte Gestão para \"Todas\" ou Especialidade/Procedimento para \"Todas\"/\"Todos\"."
       ))
 
       serie_proc <- dados()$cirurgia_procedimento_rol
@@ -2197,13 +2299,39 @@ server <- function(input, output, session) {
         "Não há valor financeiro para Cirurgias Eletivas PAB — selecione \"Físico\"."
       ))
 
+      validate(need(
+        !(gestao_ativa && input$gestao_cirurgia == "DUPLA" && input$metrica_cirurgia_anos == "financeiro"),
+        "Não há valor financeiro para gestão dupla — selecione \"Físico\"."
+      ))
+
       serie <- serie_anos_cirurgia_indicador()
       validate(need(!is.null(serie), "Série multianual não encontrada. Rode o script 02_monitoramento_diagrama_controle.R no projeto Cirurgia."))
 
       municipio_sel <- input$municipio_cirurgia
       usar_municipio <- isTRUE(input$uf_cirurgia != "BRASIL") && !is.null(municipio_sel) && municipio_sel != "Todos"
 
-      if (usar_municipio) {
+      if (gestao_ativa) {
+        serie_gest <- dados()[[paste0("cirurgia_gestao_", indicador_sel)]]
+        validate(need(!is.null(serie_gest), "Série por gestão não encontrada. Rode o script 10_series_gestao_comparacao_anos.R no projeto Cirurgia."))
+
+        sg <- serie_gest[gestao == input$gestao_cirurgia]
+        if (usar_municipio) {
+          sg <- sg[uf_atendimento == input$uf_cirurgia & municipio_atendimento == municipio_sel]
+        } else if (input$uf_cirurgia != "BRASIL") {
+          sg <- sg[uf_atendimento == input$uf_cirurgia]
+        } else if (!setequal(input$regiao_cirurgia, REGIOES)) {
+          sg <- sg[uf_atendimento %chin% UF_REF[REGIAO %in% input$regiao_cirurgia]$NM_UF_CIRURGIA]
+        }
+
+        # Meses sem produção não têm linha no arquivo por gestão: completa com
+        # zero usando os mesmos ano/mês da série sem gestão (evita "buracos").
+        grade <- unique(serie[uf_atendimento == "BRASIL", .(ano, mes)])
+        dados_uf <- sg[, .(quantidade = sum(quantidade), valor = sum(valor)), by = .(ano, mes)]
+        dados_uf <- dados_uf[grade, on = .(ano, mes)]
+        dados_uf[is.na(quantidade), quantidade := 0]
+        dados_uf[is.na(valor), valor := 0]
+        setorder(dados_uf, ano, mes)
+      } else if (usar_municipio) {
         serie_mun <- serie_municipio_cirurgia_indicador()
         validate(need(!is.null(serie_mun), "Série por município não encontrada. Rode novamente os scripts 01 e 02 do projeto Cirurgia."))
         dados_uf <- serie_mun[
@@ -2235,6 +2363,14 @@ server <- function(input, output, session) {
       rotulo_agregado(input$regiao_cirurgia)
     } else {
       input$uf_cirurgia
+    }
+  })
+
+  rotulo_gestao_cirurgia <- reactive({
+    if (isTRUE(!is.null(input$gestao_cirurgia) && input$gestao_cirurgia != "Todas")) {
+      paste0(" — Gestão ", tolower(input$gestao_cirurgia))
+    } else {
+      ""
     }
   })
 
@@ -2276,7 +2412,7 @@ server <- function(input, output, session) {
       dados_uf,
       titulo = paste0(
         rotulo_indicador, " — Comparação entre anos — ", rotulo_local_cirurgia(),
-        rotulo_procedimento_cirurgia()
+        rotulo_procedimento_cirurgia(), rotulo_gestao_cirurgia()
       ),
       metrica = input$metrica_cirurgia_anos
     )
@@ -2290,41 +2426,7 @@ server <- function(input, output, session) {
   })
 
 
-  output$tabela_status_cirurgia <- renderDT({
-
-    serie <- serie_cirurgia_indicador_fisica()
-    validate(need(!is.null(serie), ""))
-    validate(need(length(input$regiao_cirurgia) > 0, ""))
-
-    todas_regioes <- setequal(input$regiao_cirurgia, REGIOES)
-    ufs_regiao <- UF_REF[REGIAO %in% input$regiao_cirurgia]$NM_UF_CIRURGIA
-
-    status <- status_cirurgia(serie)
-
-    if (todas_regioes) {
-      status <- status[uf_atendimento %chin% c("BRASIL", ufs_regiao)]
-    } else {
-      status_regiao <- status_cirurgia(agregar_cirurgia_regiao(serie, input$regiao_cirurgia))
-      if (!is.null(status_regiao) && nrow(status_regiao) > 0) {
-        status_regiao[, uf_atendimento := rotulo_agregado(input$regiao_cirurgia)]
-      }
-      status <- rbind(status_regiao, status[uf_atendimento %chin% ufs_regiao], fill = TRUE)
-    }
-
-    datatable(
-      status,
-      colnames = c("UF", "Mês", "Quantidade", "Classificação"),
-      rownames = FALSE,
-      options = list(pageLength = 10, order = list(list(3, "asc")))
-    ) |>
-      formatRound("quantidade", digits = 0, mark = ".", interval = 3) |>
-      formatStyle(
-        "classificacao",
-        backgroundColor = styleEqual(names(CORES_CLASSIFICACAO), CORES_CLASSIFICACAO)
-      )
-  })
-
-  ## ---- Cirurgias: cabeçalho institucional (subtítulo, "limpar filtros", chips e KPIs) ----
+  ## ---- Cirurgias: cabeçalho institucional (subtítulo, "limpar filtros" e KPIs) ----
 
   output$subtitulo_cirurgia <- renderText({
     rotulo_indicador <- ROTULOS_INDICADOR_CIRURGIA[[indicador_comparacao_anos()]]
@@ -2338,55 +2440,11 @@ server <- function(input, output, session) {
     updatePickerInput(session, "regiao_cirurgia", selected = REGIOES)
     updateSelectInput(session, "uf_cirurgia", selected = "BRASIL")
     updateSelectInput(session, "municipio_cirurgia", selected = "Todos")
+    updateSelectInput(session, "gestao_cirurgia", selected = "Todas")
     updateSelectInput(session, "especialidade_cirurgia", selected = "Todas")
     updateSelectizeInput(session, "procedimento_cirurgia", selected = character(0))
     updateRadioButtons(session, "metrica_cirurgia_anos", selected = "fisico")
     updateRadioButtons(session, "metrica_cirurgia_diagrama", selected = "fisico")
-  })
-
-  observeEvent(input$chip_limpar_uf_cirurgia, {
-    updatePickerInput(session, "regiao_cirurgia", selected = REGIOES)
-    updateSelectInput(session, "uf_cirurgia", selected = "BRASIL")
-    updateSelectInput(session, "municipio_cirurgia", selected = "Todos")
-  })
-  observeEvent(input$chip_limpar_indicador_cirurgia, {
-    updateSelectInput(session, "indicador_cirurgia", selected = "rol")
-  })
-  observeEvent(input$chip_limpar_pab_cirurgia, {
-    updateCheckboxInput(session, "pab_cirurgia", value = FALSE)
-  })
-  observeEvent(input$chip_limpar_especialidade_cirurgia, {
-    updateSelectInput(session, "especialidade_cirurgia", selected = "Todas")
-    updateSelectizeInput(session, "procedimento_cirurgia", selected = character(0))
-  })
-  observeEvent(input$chip_limpar_procedimento_cirurgia, {
-    updateSelectizeInput(session, "procedimento_cirurgia", selected = character(0))
-  })
-
-  output$filtros_ativos_cirurgia <- renderUI({
-
-    chips <- list(
-      chip_filtro(rotulo_local_cirurgia(), "chip_limpar_uf_cirurgia"),
-      chip_filtro(ROTULOS_INDICADOR_CIRURGIA[[input$indicador_cirurgia]], "chip_limpar_indicador_cirurgia")
-    )
-    if (isTRUE(input$pab_cirurgia)) {
-      chips <- c(chips, list(chip_filtro("Cirurgias Eletivas PAB", "chip_limpar_pab_cirurgia")))
-    }
-    if (isTRUE(input$especialidade_cirurgia != "Todas")) {
-      chips <- c(chips, list(chip_filtro(input$especialidade_cirurgia, "chip_limpar_especialidade_cirurgia")))
-    }
-    if (length(input$procedimento_cirurgia) > 0) {
-      chips <- c(chips, list(chip_filtro(
-        paste(length(input$procedimento_cirurgia), "procedimento(s)"), "chip_limpar_procedimento_cirurgia"
-      )))
-    }
-
-    div(
-      class = "filtros-ativos",
-      span(class = "rotulo", "Filtros ativos:"),
-      tagList(chips),
-      actionLink("limpar_cirurgia", "Limpar todos", class = "limpar-todos-chip")
-    )
   })
 
   # KPIs sempre a partir da mesma base já usada pelo gráfico "Comparação
@@ -2810,6 +2868,51 @@ server <- function(input, output, session) {
     }
   )
 
+  # Os .gpkg do semáforo não guardam o período comparado (jan-mai, jan-jul...).
+  # Descobre pelo total: o mês k em que o acumulado de 2025 da série de
+  # Cirurgias (MAC+FAEC, Brasil) fica mais próximo do total 2025 do mapa. Se
+  # não houver correspondência (diferença > 1%), o subtítulo sai sem período.
+  # Mês final do período comparado no mapa (NA se não der pra deduzir).
+  semaforo_mes_ref <- reactive({
+    serie <- dados()$cirurgia_anos_total
+    if (is.null(SEMAFORO_MAPA_BR) || is.null(serie)) {
+      return(NA_integer_)
+    }
+    total_2025_mapa <- sum(st_drop_geometry(SEMAFORO_MAPA_BR)[["X2025"]], na.rm = TRUE)
+    acumulado <- serie[uf_atendimento == "BRASIL" & ano == 2025][order(mes)]
+    acumulado[, acum := cumsum(quantidade)]
+    k <- acumulado[which.min(abs(acum - total_2025_mapa))]
+    if (nrow(k) == 0L || abs(k$acum - total_2025_mapa) / total_2025_mapa > 0.01 || k$mes < 2) {
+      return(NA_integer_)
+    }
+    as.integer(k$mes)
+  })
+
+  output$subtitulo_semaforo <- renderText({
+    base <- "Variação percentual de procedimentos — 2025 vs. 2026, por UF"
+    mes <- semaforo_mes_ref()
+    if (is.na(mes)) {
+      return(base)
+    }
+    paste0(base, " (jan–", tolower(MES_LABELS[mes]), "/2026 vs. jan–", tolower(MES_LABELS[mes]), "/2025)")
+  })
+
+  # Card do cabeçalho: última competência do período comparado e data em que
+  # os mapas foram gerados.
+  output$data_atualizacao_semaforo <- renderText({
+    mes <- semaforo_mes_ref()
+    if (is.na(mes)) "" else sprintf("%02d/2026", mes)
+  })
+  output$data_processamento_semaforo <- renderText({
+    if (is.na(SEMAFORO_DATA_GERACAO)) {
+      return("")
+    }
+    paste0(
+      "Atualizado em ", MESES_PT[as.integer(format(SEMAFORO_DATA_GERACAO, "%m"))],
+      " de ", format(SEMAFORO_DATA_GERACAO, "%Y")
+    )
+  })
+
   # KPIs desta aba são de natureza diferente das outras (não é série
   # temporal, é um mapa) — contagem de UFs em alta/queda e os extremos,
   # direto do mapa Brasil (SEMAFORO_MAPA_BR), carregado uma vez só.
@@ -2890,6 +2993,13 @@ server <- function(input, output, session) {
     updateSelectInput(session, "municipio_oci", choices = escolhas, selected = selecionado)
   })
 
+  # Registros de OCI sem UF de atendimento (ver script do projeto OCI) não
+  # pertencem a nenhuma região: entram só no total Brasil, com as 5 regiões
+  # marcadas — assim o total bate com o painel oficial do SUS360.
+  oci_todas_regioes <- reactive({
+    setequal(input$regiao_oci, REGIOES)
+  })
+
   municipio_oci_ativo <- reactive({
     isTRUE(input$uf_oci != "BRASIL") && !is.null(input$municipio_oci) && input$municipio_oci != "Todos"
   })
@@ -2930,7 +3040,7 @@ server <- function(input, output, session) {
 
     if (input$uf_oci == "BRASIL") {
       serie[
-        NM_UF %chin% UF_REF[REGIAO %in% input$regiao_oci]$NM_UF_OCI,
+        NM_UF %chin% c(UF_REF[REGIAO %in% input$regiao_oci]$NM_UF_OCI, if (oci_todas_regioes()) OCI_UF_NAO_INFORMADA),
         .(oci = sum(oci, na.rm = TRUE)),
         by = competencia
       ]
@@ -2958,7 +3068,7 @@ server <- function(input, output, session) {
     validate(need(length(input$regiao_oci) > 0, "Selecione ao menos uma região."))
 
     if (input$uf_oci == "BRASIL") {
-      base[REGIAO %in% input$regiao_oci]
+      base[REGIAO %in% c(input$regiao_oci, if (oci_todas_regioes()) "Não informada")]
     } else {
       base[NM_UF == input$uf_oci]
     }
@@ -3009,7 +3119,37 @@ server <- function(input, output, session) {
   output$grafico_oci_componente_ano <- renderPlotly({
     ggplotly(plot_oci_componente_ano(), tooltip = "text") |>
       limpar_legenda_plotly() |>
+      layout(legend = list(orientation = "h", y = -0.6), margin = list(b = 120)) |>
       alta_resolucao("oci_componente_ano")
+  })
+
+  # Tabela com os valores do gráfico: uma linha por ano, uma coluna por
+  # componente e o total.
+  output$tabela_oci_componente_ano <- renderDT({
+
+    d <- dados_oci_componente_agregada()[
+      COMPONENTE %in% ORDEM_COMPONENTES_OCI,
+      .(OCI = sum(OCI, na.rm = TRUE)), by = .(ANO, COMPONENTE)
+    ]
+    validate(need(nrow(d) > 0, ""))
+
+    larga <- dcast(d, ANO ~ as.character(COMPONENTE), value.var = "OCI", fill = 0)
+    colunas <- intersect(ORDEM_COMPONENTES_OCI, names(larga))
+    larga <- larga[order(-ANO), c("ANO", colunas), with = FALSE]
+    larga[, Total := rowSums(.SD), .SDcols = colunas]
+    setnames(larga, "ANO", "Ano")
+    larga[, Ano := as.character(Ano)]
+
+    datatable(
+      larga,
+      rownames = FALSE,
+      selection = "none",
+      fillContainer = FALSE,
+      height = "auto",
+      options = list(dom = "t", ordering = FALSE, paging = FALSE)
+    ) |>
+      formatRound(c(colunas, "Total"), digits = 0, mark = ".", interval = 3) |>
+      formatStyle("Total", fontWeight = "bold")
   })
 
   plot_oci_componente_mes <- reactive({
@@ -3123,6 +3263,17 @@ server <- function(input, output, session) {
       alta_resolucao("oci_especialidade_componente")
   })
 
+  output$tabela_oci_especialidade_componente_fisico <- renderDT({
+    d <- dados_oci_especialidade_componente_agregada()
+    validate(need(nrow(d) > 0, ""))
+    tabela_oci_especialidade_componente(d, "OCI")
+  })
+  output$tabela_oci_especialidade_componente_financeiro <- renderDT({
+    d <- dados_oci_especialidade_componente_agregada()
+    validate(need(nrow(d) > 0, ""))
+    tabela_oci_especialidade_componente(d, "VALOR", moeda = TRUE)
+  })
+
   # "Comparativos": aplica o filtro de componente (todos, ou um só) antes de
   # somar por especialidade/mês — mesmo padrão da subaba "Por especialidade".
   oci_comparativos_base <- reactive({
@@ -3224,7 +3375,7 @@ server <- function(input, output, session) {
       alta_resolucao("oci_mensal_2025_2026")
   })
 
-  ## ---- OCI: cabeçalho institucional (subtítulo, "limpar filtros", chips e KPIs) ----
+  ## ---- OCI: cabeçalho institucional (subtítulo, "limpar filtros" e KPIs) ----
 
   output$subtitulo_oci <- renderText({
     rotulo_local_oci()
@@ -3241,128 +3392,123 @@ server <- function(input, output, session) {
     updateSelectInput(session, "componente_oci_comparativos", selected = "geral")
   })
 
-  observeEvent(input$chip_limpar_uf_oci, {
-    updateCheckboxGroupInput(session, "regiao_oci", selected = REGIOES)
-    updateSelectInput(session, "uf_oci", selected = "BRASIL")
-    updateSelectInput(session, "municipio_oci", selected = "Todos")
-  })
-
-  output$filtros_ativos_oci <- renderUI({
-    div(
-      class = "filtros-ativos",
-      span(class = "rotulo", "Filtros ativos:"),
-      chip_filtro(rotulo_local_oci(), "chip_limpar_uf_oci"),
-      actionLink("limpar_oci", "Limpar todos", class = "limpar-todos-chip")
-    )
-  })
-
-  # Mesmo padrão de kpi_cirurgia(), sobre a mesma base do gráfico "Produção
-  # mensal — 2025 vs 2026" (dados_oci_mensal_anos()) — sem toggle de
-  # metrica (OCI só tem contagem física).
+  # Mesma base do gráfico "Produção mensal — 2025 vs 2026"
+  # (dados_oci_mensal_anos()) — OCI só tem contagem física, sem toggle.
+  # Card 1: total do ano anterior; card 2: ano corrente até a última
+  # competência; card 3: total acumulado da série; card 4: taxa de expansão
+  # anual = 2026 até a última competência FECHADA (as últimas
+  # OCI_MESES_PRELIMINARES ainda podem ser revisadas e ficam de fora) sobre o
+  # ano anterior INTEIRO.
   kpi_oci <- reactive({
 
     d <- dados_oci_mensal_anos()
     req(nrow(d) > 0)
 
-    anos <- sort(unique(d$ano))
-    ano_max <- max(anos)
-    ano_min <- min(anos)
+    ano_atual <- max(d$ano)
+    ano_anterior <- ano_atual - 1
 
-    d_max <- d[ano == ano_max]
-    total_ano_max <- sum(d_max$oci, na.rm = TRUE)
-    meses_disponiveis <- sort(unique(d_max$mes))
+    d_atual <- d[ano == ano_atual]
+    ultima <- d_atual[which.max(mes)]
 
-    d_periodo_anterior <- d[ano == (ano_max - 1) & mes %in% meses_disponiveis]
-    total_periodo_anterior <- sum(d_periodo_anterior$oci, na.rm = TRUE)
-    variacao_periodo <- if (total_periodo_anterior > 0) (total_ano_max / total_periodo_anterior - 1) * 100 else NA_real_
+    # Valor financeiro (R$) dos mesmos anos, da mesma base filtrada do gráfico.
+    valor_ano <- oci_comparativos_base()[, .(valor = sum(VALOR, na.rm = TRUE)), by = .(ano = ANO)]
+    valor_do_ano <- function(a) {
+      v <- valor_ano[ano == a]$valor
+      if (length(v) == 0L) NA_real_ else v
+    }
 
-    maior_linha <- d[which.max(oci)]
-    ultima_linha <- d_max[which.max(mes)]
+    # Última competência fechada = última competência disponível menos
+    # OCI_MESES_PRELIMINARES meses.
+    idx_fechada <- ultima$ano * 12 + ultima$mes - OCI_MESES_PRELIMINARES
+    ano_fechado <- (idx_fechada - 1) %/% 12
+    mes_fechado <- (idx_fechada - 1) %% 12 + 1
 
-    mes_comparacao <- max(meses_disponiveis)
-    d_extremo_min <- d[ano == ano_min & mes == mes_comparacao]
-    valor_extremo_min <- if (nrow(d_extremo_min) > 0) d_extremo_min$oci[1] else NA_real_
-    valor_extremo_max <- ultima_linha$oci
-    variacao_extremos <- if (isTRUE(valor_extremo_min > 0)) (valor_extremo_max / valor_extremo_min - 1) * 100 else NA_real_
-
-    # Mesma regra dos gráficos (sombra_dados_preliminares()): os últimos 3
-    # meses da série ainda não fecharam de verdade — como "Última
-    # competência" é sempre o mês mais recente, ele cai sempre dentro dessa
-    # janela, então o card de KPI carrega o mesmo aviso do gráfico.
-    d[, competencia := as.Date(sprintf("%04d-%02d-01", ano, mes))]
-    datas_unicas <- sort(unique(d$competencia))
-    n_datas <- length(datas_unicas)
-    idx_inicio <- max(1, n_datas - 2)
-    competencias_preliminares <- datas_unicas[idx_inicio:n_datas]
-    ultima_competencia <- as.Date(sprintf("%04d-%02d-01", ultima_linha$ano, ultima_linha$mes))
-    ultima_e_preliminar <- ultima_competencia %in% competencias_preliminares
+    tx_expansao <- NA_real_
+    if (ano_fechado == ano_atual) {
+      total_fechado_atual <- sum(d[ano == ano_atual & mes <= mes_fechado]$oci, na.rm = TRUE)
+      total_anterior_inteiro <- sum(d[ano == ano_anterior]$oci, na.rm = TRUE)
+      if (total_anterior_inteiro > 0) {
+        tx_expansao <- (total_fechado_atual / total_anterior_inteiro - 1) * 100
+      }
+    }
 
     list(
-      ano_max = ano_max, ano_min = ano_min, mes_comparacao = mes_comparacao,
-      meses_disponiveis = meses_disponiveis,
-      total_ano_max = total_ano_max, variacao_periodo = variacao_periodo,
-      maior_linha = maior_linha, ultima_linha = ultima_linha,
-      valor_extremo_min = valor_extremo_min, variacao_extremos = variacao_extremos,
-      ultima_e_preliminar = ultima_e_preliminar
+      ano_atual = ano_atual, ano_anterior = ano_anterior,
+      total_anterior = sum(d[ano == ano_anterior]$oci, na.rm = TRUE),
+      total_atual = sum(d_atual$oci, na.rm = TRUE),
+      total_geral = sum(d$oci, na.rm = TRUE),
+      valor_anterior = valor_do_ano(ano_anterior),
+      valor_atual = valor_do_ano(ano_atual),
+      valor_total = sum(valor_ano$valor, na.rm = TRUE),
+      mes_ultima = ultima$mes, mes_fechado = mes_fechado, ano_fechado = ano_fechado,
+      ultima_ano = ultima$ano,
+      tx_expansao = tx_expansao
     )
   })
 
-  output$kpi_oci_producao_ano <- renderText({
-    k <- kpi_oci()
-    paste("OCI em", k$ano_max, "-", label_pt_num(k$total_ano_max))
+  output$kpi_oci_titulo1 <- renderText({
+    paste("OCI realizadas em", kpi_oci()$ano_anterior)
   })
-  output$kpi_oci_producao_ano_linha <- renderUI({
-    k <- kpi_oci()
-    if (is.na(k$variacao_periodo)) return(NULL)
-    seta <- if (k$variacao_periodo >= 0) "↑" else "↓"
-    sinal <- if (k$variacao_periodo >= 0) "+" else ""
-    classe <- if (k$variacao_periodo >= 0) "positiva" else "negativa"
-    rotulo_meses <- paste0(MES_LABELS[min(k$meses_disponiveis)], "–", MES_LABELS[max(k$meses_disponiveis)])
-    kpi_linha(
-      c(
-        paste0(seta, " ", sinal, label_pt_num(k$variacao_periodo), "% em relação a ", k$ano_max - 1),
-        paste0("(", rotulo_meses, "/", k$ano_max, " vs. ", rotulo_meses, "/", k$ano_max - 1, ")")
-      ),
-      classe = classe
-    )
+  output$kpi_oci_valor1 <- renderText({
+    label_pt_num(kpi_oci()$total_anterior)
   })
 
-  output$kpi_oci_maior_mes <- renderText({
+  output$kpi_oci_linha1 <- renderUI({
     k <- kpi_oci()
-    label_pt_num(k$maior_linha$oci)
-  })
-  output$kpi_oci_maior_mes_linha <- renderUI({
-    k <- kpi_oci()
-    kpi_linha(paste0(MES_LABELS[k$maior_linha$mes], "/", k$maior_linha$ano))
-  })
-
-  output$kpi_oci_ultima_comp <- renderText({
-    k <- kpi_oci()
-    label_pt_num(k$ultima_linha$oci)
-  })
-  output$kpi_oci_ultima_comp_linha <- renderUI({
-    k <- kpi_oci()
-    tagList(
-      kpi_linha(paste0(MES_LABELS[k$ultima_linha$mes], "/", k$ultima_linha$ano)),
-      if (isTRUE(k$ultima_e_preliminar)) {
-        div(class = "kpi-preliminar", HTML("&#9888;"), " Dado preliminar")
-      }
-    )
-  })
-
-  output$kpi_oci_variacao <- renderText({
-    k <- kpi_oci()
-    if (is.na(k$variacao_extremos)) return("—")
-    sinal <- if (k$variacao_extremos >= 0) "+" else ""
-    paste0(sinal, label_pt_num(k$variacao_extremos), "%")
-  })
-  output$kpi_oci_variacao_linha <- renderUI({
-    k <- kpi_oci()
-    if (is.na(k$variacao_extremos)) return(NULL)
-    kpi_linha(paste0(
-      MES_LABELS[k$mes_comparacao], "/", k$ano_min, " → ",
-      MES_LABELS[k$mes_comparacao], "/", k$ano_max
+    if (is.na(k$valor_anterior)) return(NULL)
+    kpi_linha(c(
+      paste0("Total do ano ", k$ano_anterior),
+      paste0("Financeiro: ", label_pt_moeda(k$valor_anterior))
     ))
+  })
+
+  output$kpi_oci_titulo2 <- renderText({
+    paste0("OCI realizadas em ", kpi_oci()$ano_atual, "*")
+  })
+  output$kpi_oci_valor2 <- renderText({
+    label_pt_num(kpi_oci()$total_atual)
+  })
+  output$kpi_oci_linha2 <- renderUI({
+    k <- kpi_oci()
+    kpi_linha(c(
+      paste0("Jan–", MES_LABELS[k$mes_ultima], "/", k$ano_atual),
+      if (!is.na(k$valor_atual)) paste0("Financeiro: ", label_pt_moeda(k$valor_atual))
+    ))
+  })
+
+  output$kpi_oci_valor3 <- renderText({
+    label_pt_num(kpi_oci()$total_geral)
+  })
+  output$kpi_oci_linha3 <- renderUI({
+    k <- kpi_oci()
+    kpi_linha(c(
+      paste0(k$ano_anterior, " + ", k$ano_atual, "*"),
+      paste0("Financeiro: ", label_pt_moeda(k$valor_total))
+    ))
+  })
+
+  output$kpi_oci_valor4 <- renderText({
+    k <- kpi_oci()
+    if (is.na(k$tx_expansao)) return("—")
+    sinal <- if (k$tx_expansao >= 0) "+" else ""
+    paste0(sinal, label_pt_num(k$tx_expansao), "%")
+  })
+  output$kpi_oci_linha4 <- renderUI({
+    k <- kpi_oci()
+    if (is.na(k$tx_expansao)) return(NULL)
+    kpi_linha(c(
+      paste0("Anual · ", k$ano_anterior, " → Jan–", MES_LABELS[k$mes_fechado], "/", k$ano_atual),
+      paste0("Até a última competência fechada (", MES_LABELS[k$mes_fechado], "/", k$ano_fechado, ")")
+    ))
+  })
+
+  output$kpi_oci_rodape <- renderText({
+    k <- kpi_oci()
+    paste0(
+      "*", k$ano_atual, ": dados disponíveis até ", MES_LABELS[k$mes_ultima], "/", k$ultima_ano,
+      " (os últimos ", OCI_MESES_PRELIMINARES, " meses ainda são preliminares e ficam de fora da taxa de expansão).",
+      " Financeiro = valor federal de referência (valor aprovado menos o complemento do gestor local; só SIA)."
+    )
   })
 
   ## ---- Pagamento Portaria 9810 ----
@@ -3580,7 +3726,7 @@ server <- function(input, output, session) {
       )
   })
 
-  ## ---- Portaria 9810: cabeçalho institucional (subtítulo, "limpar filtros", chips e KPIs) ----
+  ## ---- Portaria 9810: cabeçalho institucional (subtítulo, "limpar filtros" e KPIs) ----
 
   output$subtitulo_portaria9810 <- renderText({
     rotulo_local_portaria9810()
@@ -3590,29 +3736,6 @@ server <- function(input, output, session) {
     updateSelectInput(session, "uf_portaria9810", selected = "BRASIL")
     updateSelectInput(session, "municipio_portaria9810", selected = "Todos")
     updateCheckboxGroupInput(session, "tipo_gestao_portaria9810", selected = c("Estadual", "Municipal"))
-  })
-
-  observeEvent(input$chip_limpar_uf_portaria9810, {
-    updateSelectInput(session, "uf_portaria9810", selected = "BRASIL")
-    updateSelectInput(session, "municipio_portaria9810", selected = "Todos")
-  })
-  observeEvent(input$chip_limpar_tipo_gestao_portaria9810, {
-    updateCheckboxGroupInput(session, "tipo_gestao_portaria9810", selected = c("Estadual", "Municipal"))
-  })
-
-  output$filtros_ativos_portaria9810 <- renderUI({
-
-    chips <- list(chip_filtro(rotulo_local_portaria9810(), "chip_limpar_uf_portaria9810"))
-    if (isTRUE(length(input$tipo_gestao_portaria9810) == 1)) {
-      chips <- c(chips, list(chip_filtro(input$tipo_gestao_portaria9810, "chip_limpar_tipo_gestao_portaria9810")))
-    }
-
-    div(
-      class = "filtros-ativos",
-      span(class = "rotulo", "Filtros ativos:"),
-      tagList(chips),
-      actionLink("limpar_portaria9810", "Limpar todos", class = "limpar-todos-chip")
-    )
   })
 
   # A série da Portaria 9.810 é curta e cabe dentro de um único ano — por
