@@ -6,17 +6,17 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 
 **Cirurgias eletivas**
 - Diagrama de controle: faixa histórica 2022–2025 (min-máx e Q1-Q3), mediana e produção do ano monitorado (2026; 2025 já compõe a faixa histórica, sem linha própria), com classificação mensal em 5 níveis (Esperado → Crítico abaixo do limite). Disponível para ROL/Total (Físico e Financeiro) e, no ROL, também por Especialidade. PNRF (soma de `faec_rol_pnrf_sim`, `faec_naorol_pnrf` e `faec_rol_pnrf_nao`) não tem diagrama (histórico curto); o modo Financeiro não classifica por cor.
-- Filtros: indicador (MAC e FAEC totais / Rol / Ciru. PATE-PNRF), Região (multisseleção) + UF, Município e Gestão Estadual/Municipal (só "Comparação Anos", Físico e Financeiro; gestão do estabelecimento (Estadual/Municipal/Dupla; Dupla só no Físico); não se combina com Especialidade/Procedimento e não gera diagrama), e — só no ROL — Especialidade/Procedimento, cruzando com `dados/Relacao_cirugiasROL.xlsx` (Especialidade vale para "Comparação Anos" e "Diagrama"; Procedimento, multisseleção, só para "Comparação Anos").
-- Checkbox "Cirurgias Eletivas PAB" substitui o indicador do dropdown **só em "Comparação Anos"** (o Diagrama continua sem PAB); PAB não tem financeiro, então o toggle Financeiro fica bloqueado quando marcado.
-- Abas "Comparação Anos" e "Diagrama de monitoramento".
+- Filtros: indicador (MAC e FAEC totais / Rol / MAC, FAEC e PAB / Ciru. PATE-PNRF — "MAC, FAEC e PAB" soma os três — tem financeiro (PAB não contribui, sempre R$0), mas sem Diagrama de monitoramento), Região (multisseleção) + UF, Município e Gestão Estadual/Municipal (só "Comparação Anos", Físico e Financeiro; gestão do estabelecimento (Estadual/Municipal/Dupla; Dupla só no Físico); não se combina com Especialidade/Procedimento e não gera diagrama), e — só no ROL — Especialidade/Procedimento, cruzando com `dados/Relacao_cirugiasROL.xlsx` (Especialidade vale para "Comparação Anos" e "Diagrama"; Procedimento, multisseleção, só para "Comparação Anos").
+- Abas "Comparação Anos", "Diagrama de monitoramento" e "Ranking de Procedimentos".
+- "Ranking de Procedimentos": tabela com o Top 20 procedimentos (Eletivas totais ou do ROL; ano inteiro ou um mês de competência específico), mesma regra de análise usada no SAM — soma pelo procedimento PRINCIPAL; quando o principal é um código do subgrupo SIGTAP 04.15 (Cirurgia Múltipla — ajuste de faturamento, não uma cirurgia distinta), ele é trocado pelo procedimento SECUNDÁRIO mais frequente dentro da seleção. Segue só Região/UF (não Município/Especialidade/Gestão); indicador, ano e mês são próprios da sub-aba, com download em CSV. Gerado por `Cirurgia/scripts/11_ranking_procedimentos_cirurgia.R`, que já corta a cada UF/ano os ~100 procedimentos mais relevantes antes de quebrar por mês, para o CSV não ficar grande demais.
 - O card "Dados até a competência" mostra o último mês com produção na série de Cirurgias e, abaixo, o mês em que essa base foi gerada (`dados/processados/atualizacao_cirurgia.txt`, gravado no sync — vai junto no deploy).
 
 **OCI realizadas**
 - Usa mês de **atendimento** (`COMPETENCIA_ATENDIMENTO`), não mês de processamento.
 - Gráficos mensais ("OCI geral", "Por mês de atendimento", "OCI por especialidade") sombreiam os últimos 3 meses com "Dados preliminares" — a base ainda não fechou essas competências (`sombra_dados_preliminares()`/`anotacao_dados_preliminares()` em `app.R`).
 - "Série histórica OCI": gráfico "OCI geral" (Total + uma linha por componente/modalidade, liga/desliga pela legenda, com marcação da virada de ano) e, abaixo, dois empilhados por componente — "Por ano" e "Por mês de atendimento".
-- "Série histórica OCI por especialidade": Geral + especialidade numa subaba própria, com filtros de Especialidade e Componente; abaixo, colunas empilhadas "Por especialidade e componente" (sempre pelos 4 componentes).
-- "Comparativos": Físico/Financeiro por especialidade e produção mensal 2025 vs 2026, com filtros próprios de Especialidade e Componente (o comparativo mensal ignora Especialidade, mas respeita Componente).
+- "Série histórica OCI por especialidade": Geral + especialidade numa subaba própria, com filtros de Especialidade e Componente; abaixo, colunas empilhadas "Por especialidade e componente", com filtro próprio de Ano e de Componente (evita a barra ficar com espaço vazio enorme quando se esconde um componente pela legenda do Plotly — aqui ele já sai dos dados, e o gráfico reescala sozinho).
+- Filtro de Região (multisseleção) é uma lista suspensa, igual ao das outras abas.
 - Mesma lógica de filtro por região/UF/município do painel de cirurgias.
 - Todo valor financeiro de OCI é o **valor federal de referência** (valor aprovado − complemento do gestor local; só SIA — o CMD não tem valor). A análise é sempre por local/competência de **atendimento**; registros sem UF de atendimento (contatos do CMD) ficam em "NÃO INFORMADA" e entram só no total Brasil com as 5 regiões marcadas.
 
@@ -50,6 +50,7 @@ A aba "Variação Cirurgias" é diferente: os 3 mapas (`.gpkg`) vêm de um terce
 
 ```
 Cirurgia/resultados/02_monitoramento/tabelas/      serie_completa_*, serie_anos_* (inclui serie_anos_municipio_gestao_*, do script 10)
+Cirurgia/resultados/02_monitoramento/tabelas/      cirurgias_ranking_procedimento_uf_*, cirurgias_ranking_secundario_uf_* (script 11)
 Cirurgia/resultados/bases_processadas/fisico/      cirurgias_mensal_procedimento_rol_*.csv
 OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv
 Analise_Espacial/app_semaforo/dados/               tab_br/tab_regiao/tab_municipio *.gpkg
@@ -97,7 +98,7 @@ Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
 shiny::runApp()
 ```
 
-Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R` e `Monitoramento_oci_uf_2025_2026.R`), os dados sincronizam automaticamente para `dados/processados/`.
+Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R`/`11_ranking_procedimentos_cirurgia.R` e `Monitoramento_oci_uf_2025_2026.R`), os dados sincronizam automaticamente para `dados/processados/`.
 
 Pacotes: shiny, bslib, plotly, DT, data.table, readxl, stringi, `shinyWidgets` (dropdown de Região), `officer`/`ggplot2`/`scales`/`rvg` (exportação PPTX) e `sf`/`dplyr`/`shinycssloaders`/`writexl` (mapas e Excel da aba "Variação Cirurgias").
 

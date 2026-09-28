@@ -82,11 +82,18 @@ DATA_VIRADA_OCI <- as.Date("2026-01-01")
 # Rótulos por indicador de Cirurgias, usados no título dos gráficos e na
 # tabela — mesmo texto do radioButtons "Indicador" no sidebar.
 ROTULOS_INDICADOR_CIRURGIA <- c(
-  rol   = "Cirurgias Eletivas (MAC e FAEC) do ROL",
-  total = "Cirurgias Eletivas (MAC e FAEC) totais",
-  pnrf  = "Cirurgias Eletivas do Programa (PNRF)",
-  pab   = "Cirurgias Eletivas PAB"
+  rol       = "Cirurgias Eletivas (MAC e FAEC) do ROL",
+  total     = "Cirurgias Eletivas (MAC e FAEC) totais",
+  total_pab = "Cirurgias Eletivas (MAC, FAEC e PAB)",
+  pnrf      = "Cirurgias Eletivas do Programa (PNRF)"
 )
+
+# Quantos procedimentos entram no ranking (sub-aba "Ranking de
+# Procedimentos") e códigos do subgrupo SIGTAP 04.15 (Cirurgia Múltipla) —
+# mesmos valores do script 01_cirurgias_sam.R (projeto SAM) e do script
+# 11_ranking_procedimentos_cirurgia.R (projeto Cirurgia).
+TOP_N_RANKING_CIRURGIA <- 20L
+CODIGOS_PROCEDIMENTO_MULTIPLO_CIRURGIA <- c(415010012L, 415020034L, 415020050L)
 
 ORDEM_ESPECIALIDADES <- c(
   "Cardiologia", "Oftalmologia", "Oncologia",
@@ -296,6 +303,46 @@ carregar_serie_procedimento_rol <- function() {
   dt <- fread(arquivo, encoding = "UTF-8")
   dt[, uf_atendimento := toupper(uf_atendimento)]
   dt[, codigo_procedimento_principal := as.character(as.integer(codigo_procedimento_principal))]
+  dt[]
+}
+
+# Ranking de procedimentos por UF x ano (Eletivas totais e do ROL), grão
+# procedimento PRINCIPAL — usado pela sub-aba "Ranking de Procedimentos" da
+# aba Cirurgias. Gerado pelo script 11_ranking_procedimentos_cirurgia.R do
+# projeto Cirurgia (mesma regra das análises do SAM).
+carregar_ranking_procedimento_cirurgia <- function() {
+
+  arquivo <- localizar_arquivo(
+    DIR_TABELAS_CIRURGIA,
+    "^cirurgias_ranking_procedimento_uf_.*\\.csv$"
+  )
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, encoding = "UTF-8")
+  dt[, uf_atendimento := toupper(uf_atendimento)]
+  dt[]
+}
+
+# Tabela auxiliar por UF x ano x procedimento SECUNDÁRIO, só para os códigos
+# de Cirurgia Múltipla (CODIGOS_PROCEDIMENTO_MULTIPLO_CIRURGIA) — usada para
+# substituir esses códigos pelo secundário mais frequente dentro da seleção
+# de Região/UF do usuário (ver carregar_ranking_procedimento_cirurgia()).
+carregar_ranking_secundario_cirurgia <- function() {
+
+  arquivo <- localizar_arquivo(
+    DIR_TABELAS_CIRURGIA,
+    "^cirurgias_ranking_secundario_uf_.*\\.csv$"
+  )
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, encoding = "UTF-8")
+  dt[, uf_atendimento := toupper(uf_atendimento)]
   dt[]
 }
 
@@ -513,6 +560,8 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_pnrf_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia, "^serie_anos_municipio_gestao_pab_.*\\.csv$"),
     localizar_arquivo(origem_cirurgia_bases, "^cirurgias_mensal_procedimento_rol_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^cirurgias_ranking_procedimento_uf_.*\\.csv$"),
+    localizar_arquivo(origem_cirurgia, "^cirurgias_ranking_secundario_uf_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_municipio\\.csv$")
@@ -545,9 +594,26 @@ sincronizar_dados_locais <- function() {
   invisible(TRUE)
 }
 
+# Soma duas séries de cirurgia (mesmo esquema uf/[município/gestão]/ano/mês
+# + quantidade/valor) — usada para derivar o indicador combinado "MAC, FAEC
+# e PAB" (total_pab) a partir de *_total + *_pab, sem duplicar a leitura dos
+# arquivos nem criar um CSV extra no projeto Cirurgia (PAB já tem valor = 0
+# em todas as séries, então o financeiro do combinado bate com o do total).
+somar_series_cirurgia <- function(a, b) {
+  if (is.null(a) || is.null(b)) {
+    return(NULL)
+  }
+  chaves <- setdiff(names(a), c("quantidade", "valor"))
+  rbind(a, b, use.names = TRUE, fill = TRUE)[
+    ,
+    .(quantidade = sum(quantidade, na.rm = TRUE), valor = sum(valor, na.rm = TRUE)),
+    by = chaves
+  ]
+}
+
 carregar_tudo <- function() {
   sincronizar_dados_locais()
-  list(
+  dados <- list(
     cirurgia_rol = carregar_serie_cirurgia("rol"),
     cirurgia_total = carregar_serie_cirurgia("total"),
     cirurgia_pnrf = carregar_serie_cirurgia("pnrf"),
@@ -567,6 +633,8 @@ carregar_tudo <- function() {
     cirurgia_gestao_pnrf = carregar_serie_gestao_cirurgia("pnrf"),
     cirurgia_gestao_pab = carregar_serie_gestao_cirurgia("pab"),
     cirurgia_procedimento_rol = carregar_serie_procedimento_rol(),
+    cirurgia_ranking_procedimento = carregar_ranking_procedimento_cirurgia(),
+    cirurgia_ranking_secundario = carregar_ranking_secundario_cirurgia(),
     mapa_especialidade_rol = carregar_mapa_especialidade_rol(),
     portaria9810 = carregar_portaria9810(),
     portaria9810_limite = carregar_limite_portaria9810(),
@@ -574,6 +642,12 @@ carregar_tudo <- function() {
     oci_especialidade_componente_uf = carregar_oci_especialidade_componente_uf(),
     oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio()
   )
+
+  dados$cirurgia_anos_total_pab <- somar_series_cirurgia(dados$cirurgia_anos_total, dados$cirurgia_anos_pab)
+  dados$cirurgia_municipio_total_pab <- somar_series_cirurgia(dados$cirurgia_municipio_total, dados$cirurgia_municipio_pab)
+  dados$cirurgia_gestao_total_pab <- somar_series_cirurgia(dados$cirurgia_gestao_total, dados$cirurgia_gestao_pab)
+
+  dados
 }
 
 # Rótulo do agregado (opção "BRASIL" no seletor de UF), que reage à região
@@ -1203,16 +1277,20 @@ grafico_oci_especialidade_componente <- function(dados, titulo) {
   ordem_especialidade <- as.character(totais_especialidade$ESPECIALIDADE)
   d[, ESPECIALIDADE := factor(as.character(ESPECIALIDADE), levels = ordem_especialidade)]
 
-  # Ordem de empilhamento (de baixo para cima), igual ao gráfico de referência.
+  # Ordem de empilhamento (de baixo para cima), igual ao gráfico de
+  # referência — mas só os componentes que sobraram no filtro (ver
+  # dados_oci_especialidade_componente_agregada()), para a legenda não
+  # listar um componente sem nenhuma barra.
   ordem_pilha <- c("Carretas", "Componente Ambulatorial", "Créditos Financeiros", "Equipes Volantes")
+  ordem_presente <- intersect(ordem_pilha, as.character(unique(d$COMPONENTE)))
 
-  d <- d[COMPONENTE %in% ordem_pilha]
-  d[, COMPONENTE := factor(as.character(COMPONENTE), levels = rev(ordem_pilha))]
+  d <- d[COMPONENTE %in% ordem_presente]
+  d[, COMPONENTE := factor(as.character(COMPONENTE), levels = rev(ordem_presente))]
   d[, texto := paste0(COMPONENTE, "<br>", ESPECIALIDADE, "<br>OCI: ", label_pt_num(OCI))]
 
   ggplot(d, aes(x = ESPECIALIDADE, y = OCI, fill = COMPONENTE, text = texto)) +
     geom_col(width = 0.7) +
-    scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI, breaks = ordem_pilha) +
+    scale_fill_manual(name = NULL, values = CORES_COMPONENTE_OCI, breaks = ordem_presente) +
     scale_y_continuous(labels = label_pt_num) +
     labs(title = titulo, x = NULL, y = "OCI realizadas") +
     theme_minimal(base_size = 12) +
@@ -1260,43 +1338,6 @@ tabela_oci_especialidade_componente <- function(dados, coluna, moeda = FALSE) {
     valueColumns = "Especialidade",
     fontWeight = styleEqual("Total", "bold")
   )
-}
-
-grafico_oci_fisico_especialidade <- function(dados, titulo) {
-
-  d <- dados[order(ESPECIALIDADE, ANO)]
-  anos <- sort(unique(d$ANO))
-  cores <- cores_para_anos(anos)
-  d[, ano_fct := factor(ANO, levels = anos)]
-  d[, ESPECIALIDADE := factor(ESPECIALIDADE, levels = ORDEM_ESPECIALIDADES)]
-  d[, texto := paste0(ANO, "<br>", ESPECIALIDADE, "<br>OCI: ", label_pt_num(OCI))]
-
-  ggplot(d, aes(x = ESPECIALIDADE, y = OCI, fill = ano_fct, text = texto)) +
-    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-    scale_fill_manual(name = NULL, values = cores) +
-    scale_y_continuous(labels = label_pt_num) +
-    labs(title = titulo, x = "Especialidade", y = "OCI realizadas (físico)") +
-    theme_minimal(base_size = 12) +
-    theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 13))
-}
-
-grafico_oci_mensal_anos <- function(dados, titulo) {
-
-  d <- dados[order(ano, mes)]
-  anos <- sort(unique(d$ano))
-  cores <- cores_para_anos(anos)
-  d[, ano_fct := factor(ano, levels = anos)]
-  d[, mes_fct := factor(mes, levels = 1:12, labels = MES_LABELS)]
-  d[, texto := paste0(ano, " — Mês: ", MES_LABELS[mes], "<br>OCI: ", label_pt_num(oci))]
-
-  ggplot(d, aes(x = mes_fct, y = oci, fill = ano_fct, text = texto)) +
-    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-    scale_fill_manual(name = NULL, values = cores) +
-    scale_y_continuous(labels = label_pt_num) +
-    expand_limits(y = 0) +
-    labs(title = titulo, x = "Mês de competência", y = "OCI realizadas") +
-    theme_minimal(base_size = 12) +
-    theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 13))
 }
 
 CORES_TIPO_GESTAO <- c("ESTADUAL" = "#185FA5", "MUNICIPAL" = "#D85A30")
@@ -1609,7 +1650,6 @@ ui <- page_navbar(
            'grafico_cirurgia', 'grafico_comparacao_anos',
            'grafico_oci_componente', 'grafico_oci_componente_ano', 'grafico_oci_componente_mes',
            'grafico_oci_especialidade', 'grafico_oci_especialidade_componente',
-           'grafico_oci_fisico_especialidade', 'grafico_oci_mensal_anos',
            'grafico_portaria9810_mensal', 'grafico_portaria9810_programa', 'grafico_portaria9810_limite'
          ].forEach(function (id) {
            var el = document.getElementById(id);
@@ -1630,12 +1670,10 @@ ui <- page_navbar(
           choices = c(
             "MAC e FAEC totais" = "total",
             "MAC e FAEC do Rol" = "rol",
+            "MAC, FAEC e PAB" = "total_pab",
             "Ciru. PATE (PNRF)" = "pnrf"
           ),
           selected = "rol"
-        ),
-        checkboxInput(
-          "pab_cirurgia", "Cirurgias Eletivas PAB", value = FALSE
         ),
         fluidRow(
           column(
@@ -1673,10 +1711,11 @@ ui <- page_navbar(
           options = list(plugins = list("remove_button"), placeholder = "Todos (especialidade inteira)")
         ),
         caixa_info_sidebar(
-          "PAB vale só para \"Comparação Anos\" (sem valor financeiro) — substitui o indicador acima enquanto marcado.",
+          "Indicador \"MAC, FAEC e PAB\" (com financeiro) vale só em \"Comparação Anos\" — sem Diagrama de monitoramento.",
           "Filtros de Município e Gestão valem só para \"Comparação Anos\" — o Diagrama de monitoramento continua por UF/Região, sem separar por gestão.",
           "Gestão = gestão do estabelecimento. Gestão dupla não tem valor financeiro (só Físico). Gestão não se combina com Especialidade/Procedimento.",
-          "Indicador ROL — Físico: Especialidade vale para \"Comparação Anos\" e \"Diagrama de monitoramento\"; Procedimento só para \"Comparação Anos\"."
+          "Indicador ROL — Físico: Especialidade vale para \"Comparação Anos\" e \"Diagrama de monitoramento\"; Procedimento só para \"Comparação Anos\".",
+          "Ranking de Procedimentos segue Região/UF (não Município/Especialidade/Gestão) e tem indicador, ano e mês próprios, dentro da aba."
         ),
         info_fonte_dados()
       ),
@@ -1717,6 +1756,34 @@ ui <- page_navbar(
           ),
           plotlyOutput("grafico_cirurgia", height = "62vh"),
           barra_downloads("grafico_cirurgia")
+        ),
+        tabPanel(
+          "Ranking de Procedimentos",
+          br(),
+          radioButtons(
+            "indicador_ranking_cirurgia", NULL,
+            choices = c("Eletivas totais" = "totais", "Eletivas do ROL" = "rol"),
+            selected = "totais", inline = TRUE
+          ),
+          fluidRow(
+            column(
+              6,
+              selectInput("ano_ranking_cirurgia", "Ano", choices = NULL, width = "140px")
+            ),
+            column(
+              6,
+              selectInput(
+                "mes_ranking_cirurgia", "Mês de competência",
+                choices = c("Ano inteiro" = "0"), selected = "0", width = "180px"
+              )
+            )
+          ),
+          div(class = "subtitulo mb-2", textOutput("subtitulo_ranking_cirurgia", inline = TRUE)),
+          DTOutput("tabela_ranking_cirurgia", height = "auto"),
+          div(
+            class = "mb-3 mt-2",
+            downloadButton("tabela_ranking_cirurgia_csv", "Dados (CSV)", class = "btn-sm btn-outline-secondary")
+          )
         )
       )
     )
@@ -1848,9 +1915,13 @@ ui <- page_navbar(
       sidebar = sidebar(
         open = "always", width = "310px",
         sidebar_cabecalho("limpar_oci"),
-        checkboxGroupInput(
+        pickerInput(
           "regiao_oci", "Região",
-          choices = REGIOES, selected = REGIOES
+          choices = REGIOES, selected = REGIOES, multiple = TRUE,
+          options = pickerOptions(
+            actionsBox = TRUE, selectedTextFormat = "count > 2",
+            countSelectedText = "{0} regiões", noneSelectedText = "Nenhuma região"
+          )
         ),
         selectInput("uf_oci", "UF", choices = "BRASIL", selected = "BRASIL"),
         selectInput(
@@ -1858,7 +1929,7 @@ ui <- page_navbar(
           choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
         ),
         caixa_info_sidebar(
-          "Filtro de Município vale para \"Série histórica\" e \"Comparativos\".",
+          "Filtro de Município vale para todas as abas de OCI.",
           "Registros sem UF de atendimento (contatos do CMD) entram só no total Brasil, com as 5 regiões marcadas."
         ),
         info_fonte_dados_oci()
@@ -1918,44 +1989,16 @@ ui <- page_navbar(
             "anos_oci_especialidade_componente", "Ano",
             choices = ANOS_OCI, selected = ANOS_OCI, inline = TRUE
           ),
+          checkboxGroupInput(
+            "componentes_oci_especialidade_componente", "Componente",
+            choices = ORDEM_COMPONENTES_OCI, selected = ORDEM_COMPONENTES_OCI, inline = TRUE
+          ),
           plotlyOutput("grafico_oci_especialidade_componente", height = "50vh"),
           barra_downloads("grafico_oci_especialidade_componente"),
           h6("Físico — OCI realizadas", style = "margin-top: 16px;"),
           DTOutput("tabela_oci_especialidade_componente_fisico", height = "auto"),
           h6("Financeiro — valor federal de referência (R$)", style = "margin-top: 16px;"),
           DTOutput("tabela_oci_especialidade_componente_financeiro", height = "auto")
-        ),
-        tabPanel(
-          "Comparativos",
-          br(),
-          fluidRow(
-            column(
-              8,
-              checkboxGroupInput(
-                "especialidades_oci_comparativos", "Especialidades",
-                choices = ORDEM_ESPECIALIDADES, selected = ORDEM_ESPECIALIDADES,
-                inline = TRUE
-              )
-            ),
-            column(
-              4,
-              selectInput(
-                "componente_oci_comparativos", "Componente",
-                choices = COMPONENTES_OCI_FILTRO, selected = "geral"
-              )
-            )
-          ),
-          br(),
-          h5("Físico por especialidade"),
-          plotlyOutput("grafico_oci_fisico_especialidade", height = "40vh"),
-          barra_downloads("grafico_oci_fisico_especialidade"),
-          br(),
-          h5("Financeiro por especialidade — valor federal de referência (R$)"),
-          DTOutput("tabela_oci_financeiro"),
-          br(),
-          h5("Produção mensal — 2025 vs 2026"),
-          plotlyOutput("grafico_oci_mensal_anos", height = "38vh"),
-          barra_downloads("grafico_oci_mensal_anos")
         )
       )
     )
@@ -2124,8 +2167,12 @@ server <- function(input, output, session) {
     }
 
     validate(need(
-      input$indicador_cirurgia != "pnrf",
-      "Diagrama de monitoramento não disponível para o Programa (PNRF) — o histórico ainda é curto demais para gerar faixas de controle confiáveis. Use \"Comparação Anos\" ou a \"Tabela\" para acompanhar o PNRF."
+      !input$indicador_cirurgia %in% c("pnrf", "total_pab"),
+      if (isTRUE(input$indicador_cirurgia == "total_pab")) {
+        "Diagrama de monitoramento não disponível para \"MAC, FAEC e PAB\" — as faixas de controle são calculadas só para MAC e FAEC (totais/ROL). Use \"Comparação Anos\"."
+      } else {
+        "Diagrama de monitoramento não disponível para o Programa (PNRF) — o histórico ainda é curto demais para gerar faixas de controle confiáveis. Use \"Comparação Anos\"."
+      }
     ))
 
     serie <- serie_cirurgia_indicador()
@@ -2172,12 +2219,139 @@ server <- function(input, output, session) {
       alta_resolucao("diagrama_monitoramento_cirurgias")
   })
 
-  # Indicador efetivo de "Comparação Anos": PAB (checkbox) substitui o
-  # indicador do dropdown só aqui — Diagrama de monitoramento e Tabela
-  # continuam sempre com input$indicador_cirurgia, sem PAB (não tem
-  # diagrama de controle nem tabela de status calculados).
+  ## ---- Cirurgias: Ranking de Procedimentos ----
+  # Segue a mesma regra de análise usada no SAM (script 01_cirurgias_sam.R
+  # do projeto SAM): ranking pelo procedimento PRINCIPAL, com os códigos de
+  # Cirurgia Múltipla (subgrupo SIGTAP 04.15) substituídos pelo secundário
+  # mais frequente. Diferença: aqui isso é recalculado dentro da seleção de
+  # Região/UF do usuário, não fixo em "Brasil" — ver script
+  # 11_ranking_procedimentos_cirurgia.R (projeto Cirurgia).
+
+  observeEvent(dados(), {
+    ranking <- dados()$cirurgia_ranking_procedimento
+    if (is.null(ranking)) return()
+    anos <- sort(unique(ranking$ano), decreasing = TRUE)
+    updateSelectInput(session, "ano_ranking_cirurgia", choices = anos, selected = anos[1])
+    escolhas_mes <- c("Ano inteiro" = "0", setNames(as.character(1:12), MES_LABELS))
+    updateSelectInput(session, "mes_ranking_cirurgia", choices = escolhas_mes, selected = "0")
+  }, once = TRUE)
+
+  ranking_cirurgia_top <- reactive({
+
+    req(input$uf_cirurgia, input$ano_ranking_cirurgia, input$indicador_ranking_cirurgia, input$mes_ranking_cirurgia)
+    validate(need(length(input$regiao_cirurgia) > 0, "Selecione ao menos uma região."))
+
+    base <- dados()$cirurgia_ranking_procedimento
+    validate(need(!is.null(base), "Ranking de procedimentos não encontrado. Rode o script 11_ranking_procedimentos_cirurgia.R no projeto Cirurgia."))
+
+    ano_sel <- as.integer(input$ano_ranking_cirurgia)
+    mes_sel <- as.integer(input$mes_ranking_cirurgia)
+    coluna_qtd <- if (input$indicador_ranking_cirurgia == "rol") "qtd_eletivas_rol" else "qtd_eletivas_totais"
+
+    ufs_sel <- if (input$uf_cirurgia == "BRASIL") {
+      UF_REF[REGIAO %in% input$regiao_cirurgia]$NM_UF_CIRURGIA
+    } else {
+      input$uf_cirurgia
+    }
+
+    base_sel <- base[ano == ano_sel & uf_atendimento %chin% ufs_sel]
+    if (mes_sel > 0) {
+      base_sel <- base_sel[mes == mes_sel]
+    }
+    validate(need(nrow(base_sel) > 0, "Sem dados para a seleção atual."))
+
+    ranking <- base_sel[
+      , .(quantidade = sum(get(coluna_qtd), na.rm = TRUE)),
+      by = .(codigo_procedimento, nome_procedimento)
+    ]
+    ranking <- ranking[quantidade > 0]
+    validate(need(nrow(ranking) > 0, "Sem dados para a seleção atual."))
+    setorder(ranking, -quantidade)
+    ranking <- head(ranking, TOP_N_RANKING_CIRURGIA)
+    ranking[, ranking := .I]
+
+    # Substituição da Cirurgia Múltipla, recalculada dentro da mesma
+    # seleção de Região/UF/Ano — mesma lógica do SAM, ver comentário acima.
+    secundario <- dados()$cirurgia_ranking_secundario
+    idx_multiplo <- which(ranking$codigo_procedimento %in% CODIGOS_PROCEDIMENTO_MULTIPLO_CIRURGIA)
+
+    if (!is.null(secundario) && length(idx_multiplo) > 0) {
+      for (i in idx_multiplo) {
+
+        codigo_original <- ranking$codigo_procedimento[i]
+        nome_original <- ranking$nome_procedimento[i]
+
+        secs_filtro <- secundario[
+          ano == ano_sel & uf_atendimento %chin% ufs_sel & codigo_procedimento_principal == codigo_original
+        ]
+        if (mes_sel > 0) {
+          secs_filtro <- secs_filtro[mes == mes_sel]
+        }
+        secs <- secs_filtro[
+          , .(qtd_sec = sum(get(coluna_qtd), na.rm = TRUE)),
+          by = .(codigo_procedimento_secundario, nome_procedimento_secundario)
+        ]
+        secs <- secs[qtd_sec > 0]
+        if (nrow(secs) == 0L) next
+
+        setorder(secs, -qtd_sec)
+        mais_frequente <- secs[1]
+
+        set(ranking, i, "codigo_procedimento", mais_frequente$codigo_procedimento_secundario)
+        set(
+          ranking, i, "nome_procedimento",
+          paste0(
+            mais_frequente$nome_procedimento_secundario,
+            " (secundário mais frequente em ", nome_original, ")"
+          )
+        )
+      }
+    }
+
+    setcolorder(ranking, c("ranking", "codigo_procedimento", "nome_procedimento", "quantidade"))
+    ranking[]
+  })
+
+  rotulo_ranking_cirurgia <- reactive({
+    if (isTRUE(input$indicador_ranking_cirurgia == "rol")) {
+      "Cirurgias Eletivas do ROL"
+    } else {
+      "Cirurgias Eletivas totais"
+    }
+  })
+
+  output$subtitulo_ranking_cirurgia <- renderText({
+    req(input$mes_ranking_cirurgia)
+    mes_sel <- as.integer(input$mes_ranking_cirurgia)
+    rotulo_periodo <- if (mes_sel > 0) {
+      paste0(MES_LABELS[mes_sel], "/", input$ano_ranking_cirurgia)
+    } else {
+      input$ano_ranking_cirurgia
+    }
+    paste0(rotulo_ranking_cirurgia(), " — ", rotulo_periodo, " — ", rotulo_local_cirurgia())
+  })
+
+  output$tabela_ranking_cirurgia_csv <- handler_csv(ranking_cirurgia_top, "ranking_procedimentos_cirurgia")
+
+  output$tabela_ranking_cirurgia <- renderDT({
+    d <- ranking_cirurgia_top()
+    datatable(
+      d,
+      colnames = c("#", "Código", "Procedimento", "Quantidade"),
+      rownames = FALSE,
+      selection = "none",
+      fillContainer = FALSE,
+      height = "auto",
+      options = list(dom = "t", ordering = FALSE, paging = FALSE, pageLength = TOP_N_RANKING_CIRURGIA)
+    ) |>
+      formatRound("quantidade", digits = 0, mark = ".", interval = 3)
+  })
+
+  # Indicador efetivo de "Comparação Anos" — hoje é sempre
+  # input$indicador_cirurgia (o combinado "MAC, FAEC e PAB" já está no
+  # próprio dropdown; ver total_pab em carregar_tudo()/somar_series_cirurgia()).
   indicador_comparacao_anos <- reactive({
-    if (isTRUE(input$pab_cirurgia)) "pab" else input$indicador_cirurgia
+    input$indicador_cirurgia
   })
 
   serie_anos_cirurgia_indicador <- reactive({
@@ -2293,11 +2467,6 @@ server <- function(input, output, session) {
       )
 
     } else {
-
-      validate(need(
-        indicador_sel != "pab" || input$metrica_cirurgia_anos == "fisico",
-        "Não há valor financeiro para Cirurgias Eletivas PAB — selecione \"Físico\"."
-      ))
 
       validate(need(
         !(gestao_ativa && input$gestao_cirurgia == "DUPLA" && input$metrica_cirurgia_anos == "financeiro"),
@@ -2436,7 +2605,6 @@ server <- function(input, output, session) {
 
   observeEvent(input$limpar_cirurgia, {
     updateSelectInput(session, "indicador_cirurgia", selected = "rol")
-    updateCheckboxInput(session, "pab_cirurgia", value = FALSE)
     updatePickerInput(session, "regiao_cirurgia", selected = REGIOES)
     updateSelectInput(session, "uf_cirurgia", selected = "BRASIL")
     updateSelectInput(session, "municipio_cirurgia", selected = "Todos")
@@ -2445,6 +2613,8 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "procedimento_cirurgia", selected = character(0))
     updateRadioButtons(session, "metrica_cirurgia_anos", selected = "fisico")
     updateRadioButtons(session, "metrica_cirurgia_diagrama", selected = "fisico")
+    updateRadioButtons(session, "indicador_ranking_cirurgia", selected = "totais")
+    updateSelectInput(session, "mes_ranking_cirurgia", selected = "0")
   })
 
   # KPIs sempre a partir da mesma base já usada pelo gráfico "Comparação
@@ -3227,9 +3397,11 @@ server <- function(input, output, session) {
       alta_resolucao("oci_por_especialidade")
   })
 
-  # "OCI por especialidade e componente": sempre quebra pelos 4 componentes
-  # (ignora o filtro de Componente, que aqui não se aplica), respeita o
-  # filtro de Especialidades e tem filtro de Ano próprio (só deste gráfico).
+  # "OCI por especialidade e componente": respeita o filtro de Especialidade
+  # da sub-aba e tem Ano e Componente próprios (só deste gráfico — este
+  # último resolve o problema de clicar na legenda do Plotly para esconder
+  # um componente e sobrar um espaço vazio enorme no eixo Y: aqui o
+  # componente já sai dos dados, então o gráfico reescala sozinho).
   dados_oci_especialidade_componente_agregada <- reactive({
 
     especialidades_sel <- input$especialidades_oci_sub
@@ -3238,8 +3410,13 @@ server <- function(input, output, session) {
     anos_sel <- input$anos_oci_especialidade_componente
     validate(need(length(anos_sel) > 0, "Selecione ao menos um ano."))
 
+    componentes_sel <- input$componentes_oci_especialidade_componente
+    validate(need(length(componentes_sel) > 0, "Selecione ao menos um componente."))
+
     oci_especialidade_componente_filtrada()[
-      ESPECIALIDADE %chin% especialidades_sel & ANO %in% as.integer(anos_sel)
+      ESPECIALIDADE %chin% especialidades_sel &
+        ANO %in% as.integer(anos_sel) &
+        COMPONENTE %chin% componentes_sel
     ]
   })
 
@@ -3274,105 +3451,17 @@ server <- function(input, output, session) {
     tabela_oci_especialidade_componente(d, "VALOR", moeda = TRUE)
   })
 
-  # "Comparativos": aplica o filtro de componente (todos, ou um só) antes de
-  # somar por especialidade/mês — mesmo padrão da subaba "Por especialidade".
-  oci_comparativos_base <- reactive({
-
-    base <- oci_especialidade_componente_filtrada()
-
-    if (isTRUE(input$componente_oci_comparativos != "geral")) {
-      base <- base[COMPONENTE == input$componente_oci_comparativos]
-    }
-
-    base
-  })
-
-  rotulo_componente_oci_comparativos <- reactive({
-    if (isTRUE(input$componente_oci_comparativos == "geral")) {
-      "todos os componentes"
-    } else {
-      input$componente_oci_comparativos
-    }
-  })
-
-  # Base física + financeira por especialidade/ano, reaproveitada pelo
-  # gráfico físico e pela tabela financeira em "Comparativos".
-  oci_especialidade_por_ano <- reactive({
-
-    especialidades_sel <- input$especialidades_oci_comparativos
-    validate(need(length(especialidades_sel) > 0, "Selecione ao menos uma especialidade."))
-
-    agregada <- oci_comparativos_base()[
-      ESPECIALIDADE %chin% especialidades_sel,
-      .(OCI = sum(OCI, na.rm = TRUE), VALOR = sum(VALOR, na.rm = TRUE)),
-      by = .(ANO, ESPECIALIDADE)
-    ]
-    validate(need(nrow(agregada) > 0, "Sem dados para a seleção atual."))
-
-    agregada
-  })
-
-  plot_oci_fisico_especialidade <- reactive({
-    grafico_oci_fisico_especialidade(
-      oci_especialidade_por_ano(),
-      titulo = paste0(
-        "Físico por especialidade — ", rotulo_componente_oci_comparativos(), " — ", rotulo_local_oci()
-      )
-    )
-  })
-
-  output$grafico_oci_fisico_especialidade <- renderPlotly({
-    ggplotly(plot_oci_fisico_especialidade(), tooltip = "text") |>
-      limpar_legenda_plotly() |>
-      layout(legend = list(orientation = "h", y = -0.25), margin = list(b = 90)) |>
-      alta_resolucao("oci_fisico_especialidade")
-  })
-
-  output$tabela_oci_financeiro <- renderDT({
-
-    agregada <- oci_especialidade_por_ano()
-
-    tabela <- dcast(
-      agregada, ESPECIALIDADE ~ ANO,
-      value.var = "VALOR", fun.aggregate = sum, fill = 0
-    )
-    colunas_ano <- setdiff(names(tabela), "ESPECIALIDADE")
-
-    datatable(
-      tabela,
-      colnames = c("Especialidade", colunas_ano),
-      rownames = FALSE,
-      options = list(dom = "t", pageLength = -1, ordering = FALSE)
-    ) |>
-      formatCurrency(colunas_ano, currency = "R$ ", interval = 3, mark = ".", digits = 0)
-  })
-
-  # Ignora o filtro de Especialidades (comparativo mensal usa a série geral
-  # do escopo filtrado), mas respeita o filtro de Componente.
+  # Base de OCI (todos os componentes) usada pelos KPIs do topo da aba —
+  # soma por ano/mês, sem os filtros de Especialidade/Componente das outras
+  # sub-abas (KPI é sempre a visão geral da seleção de Região/UF/Município).
   dados_oci_mensal_anos <- reactive({
 
-    dados_grafico <- oci_comparativos_base()[
+    dados_grafico <- oci_especialidade_componente_filtrada()[
       , .(oci = sum(OCI, na.rm = TRUE)), by = .(ano = ANO, mes = MES)
     ]
     validate(need(nrow(dados_grafico) > 0, "Sem dados para a seleção atual."))
 
     dados_grafico
-  })
-
-  plot_oci_mensal_anos <- reactive({
-    grafico_oci_mensal_anos(
-      dados_oci_mensal_anos(),
-      titulo = paste0(
-        "Produção mensal — 2025 vs 2026 — ", rotulo_componente_oci_comparativos(), " — ", rotulo_local_oci()
-      )
-    )
-  })
-
-  output$grafico_oci_mensal_anos <- renderPlotly({
-    ggplotly(plot_oci_mensal_anos(), tooltip = "text") |>
-      limpar_legenda_plotly() |>
-      layout(legend = list(orientation = "h", y = -0.2), margin = list(b = 80)) |>
-      alta_resolucao("oci_mensal_2025_2026")
   })
 
   ## ---- OCI: cabeçalho institucional (subtítulo, "limpar filtros" e KPIs) ----
@@ -3382,14 +3471,13 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$limpar_oci, {
-    updateCheckboxGroupInput(session, "regiao_oci", selected = REGIOES)
+    updatePickerInput(session, "regiao_oci", selected = REGIOES)
     updateSelectInput(session, "uf_oci", selected = "BRASIL")
     updateSelectInput(session, "municipio_oci", selected = "Todos")
     updateCheckboxGroupInput(session, "especialidades_oci_sub", selected = ORDEM_ESPECIALIDADES)
     updateSelectInput(session, "componente_oci_sub", selected = "geral")
     updateCheckboxGroupInput(session, "anos_oci_especialidade_componente", selected = ANOS_OCI)
-    updateCheckboxGroupInput(session, "especialidades_oci_comparativos", selected = ORDEM_ESPECIALIDADES)
-    updateSelectInput(session, "componente_oci_comparativos", selected = "geral")
+    updateCheckboxGroupInput(session, "componentes_oci_especialidade_componente", selected = ORDEM_COMPONENTES_OCI)
   })
 
   # Mesma base do gráfico "Produção mensal — 2025 vs 2026"
@@ -3411,7 +3499,7 @@ server <- function(input, output, session) {
     ultima <- d_atual[which.max(mes)]
 
     # Valor financeiro (R$) dos mesmos anos, da mesma base filtrada do gráfico.
-    valor_ano <- oci_comparativos_base()[, .(valor = sum(VALOR, na.rm = TRUE)), by = .(ano = ANO)]
+    valor_ano <- oci_especialidade_componente_filtrada()[, .(valor = sum(VALOR, na.rm = TRUE)), by = .(ano = ANO)]
     valor_do_ano <- function(a) {
       v <- valor_ano[ano == a]$valor
       if (length(v) == 0L) NA_real_ else v
@@ -3853,10 +3941,6 @@ server <- function(input, output, session) {
     plot_oci_especialidade_componente, "oci_especialidade_componente"
   )
 
-  output$grafico_oci_fisico_especialidade_csv <- handler_csv(oci_especialidade_por_ano, "oci_fisico_especialidade")
-  output$grafico_oci_fisico_especialidade_pptx <- handler_pptx(plot_oci_fisico_especialidade, "oci_fisico_especialidade")
-  output$grafico_oci_mensal_anos_csv <- handler_csv(dados_oci_mensal_anos, "oci_mensal_2025_2026")
-  output$grafico_oci_mensal_anos_pptx <- handler_pptx(plot_oci_mensal_anos, "oci_mensal_2025_2026")
 
   output$grafico_portaria9810_mensal_csv <- handler_csv(dados_portaria9810_mensal, "portaria9810_pagamentos_mensal")
   output$grafico_portaria9810_mensal_pptx <- handler_pptx(plot_portaria9810_mensal, "portaria9810_pagamentos_mensal")
@@ -3876,14 +3960,13 @@ server <- function(input, output, session) {
   # aba ser visitada).
   botoes_download <- c(
     "grafico_cirurgia_csv", "grafico_cirurgia_pptx",
+    "tabela_ranking_cirurgia_csv",
     "grafico_comparacao_anos_csv", "grafico_comparacao_anos_pptx",
     "grafico_oci_componente_csv", "grafico_oci_componente_pptx",
     "grafico_oci_componente_ano_csv", "grafico_oci_componente_ano_pptx",
     "grafico_oci_componente_mes_csv", "grafico_oci_componente_mes_pptx",
     "grafico_oci_especialidade_csv", "grafico_oci_especialidade_pptx",
     "grafico_oci_especialidade_componente_csv", "grafico_oci_especialidade_componente_pptx",
-    "grafico_oci_fisico_especialidade_csv", "grafico_oci_fisico_especialidade_pptx",
-    "grafico_oci_mensal_anos_csv", "grafico_oci_mensal_anos_pptx",
     "grafico_portaria9810_mensal_csv", "grafico_portaria9810_mensal_pptx",
     "grafico_portaria9810_programa_csv", "grafico_portaria9810_programa_pptx",
     "grafico_portaria9810_limite_csv", "grafico_portaria9810_limite_pptx",

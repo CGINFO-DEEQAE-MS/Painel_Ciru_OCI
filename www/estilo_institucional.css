@@ -464,7 +464,8 @@ html, body {
    herda a altura mínima de "fill item" (400px) e deixava um vão em branco. */
 #tabela_oci_componente_ano,
 #tabela_oci_especialidade_componente_fisico,
-#tabela_oci_especialidade_componente_financeiro {
+#tabela_oci_especialidade_componente_financeiro,
+#tabela_ranking_cirurgia {
   min-height: 0 !important;
   height: auto !important;
   flex: 0 0 auto !important;
@@ -473,6 +474,7 @@ html, body {
 
 #tabela_oci_componente_ano td,
 #tabela_oci_especialidade_componente_fisico td,
-#tabela_oci_especialidade_componente_financeiro td {
+#tabela_oci_especialidade_componente_financeiro td,
+#tabela_ranking_cirurgia td {
   white-space: nowrap;
 }
