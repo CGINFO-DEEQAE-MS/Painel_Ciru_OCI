@@ -1715,7 +1715,7 @@ ui <- page_navbar(
           "Filtros de Município e Gestão valem só para \"Comparação Anos\" — o Diagrama de monitoramento continua por UF/Região, sem separar por gestão.",
           "Gestão = gestão do estabelecimento. Gestão dupla não tem valor financeiro (só Físico). Gestão não se combina com Especialidade/Procedimento.",
           "Indicador ROL — Físico: Especialidade vale para \"Comparação Anos\" e \"Diagrama de monitoramento\"; Procedimento só para \"Comparação Anos\".",
-          "Ranking de Procedimentos segue Região/UF/Especialidade/Procedimento (não Município/Gestão) e tem indicador, ano e mês próprios, dentro da aba."
+          "Ranking de Procedimentos segue Região/UF (não Município/Especialidade/Gestão) e tem indicador, ano e mês próprios, dentro da aba."
         ),
         info_fonte_dados()
       ),
@@ -2258,26 +2258,6 @@ server <- function(input, output, session) {
     if (mes_sel > 0) {
       base_sel <- base_sel[mes == mes_sel]
     }
-
-    # Segue o mesmo filtro de Especialidade/Procedimento da lateral esquerda
-    # (cruza pelo código SIGTAP com dados()$mapa_especialidade_rol, igual
-    # a filtrar_procedimento_rol()) — vale para "Eletivas totais" e "do
-    # ROL", independente do indicador principal do sidebar.
-    especialidade_sel <- if (is.null(input$especialidade_cirurgia)) "Todas" else input$especialidade_cirurgia
-    if (isTRUE(especialidade_sel != "Todas")) {
-
-      mapa <- dados()$mapa_especialidade_rol
-      validate(need(!is.null(mapa), "Mapa de Especialidade não encontrado. Confira dados/Relacao_cirugiasROL.xlsx."))
-
-      codigos_sel <- mapa[especialidade == especialidade_sel]$codigo_procedimento_principal
-      procedimentos_sel <- input$procedimento_cirurgia
-      if (length(procedimentos_sel) > 0) {
-        codigos_sel <- intersect(codigos_sel, procedimentos_sel)
-      }
-
-      base_sel <- base_sel[as.character(codigo_procedimento) %chin% codigos_sel]
-    }
-
     validate(need(nrow(base_sel) > 0, "Sem dados para a seleção atual."))
 
     ranking <- base_sel[
@@ -2340,28 +2320,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # Mesmo sufixo " — Especialidade — Procedimento(s)" de
-  # rotulo_procedimento_cirurgia(), mas sem o gate de indicador == "rol":
-  # o Ranking aplica Especialidade/Procedimento em "Eletivas totais" e
-  # "do ROL" (ver ranking_cirurgia_top()).
-  rotulo_especialidade_ranking <- reactive({
-
-    especialidade_sel <- input$especialidade_cirurgia
-    if (is.null(especialidade_sel) || especialidade_sel == "Todas") {
-      return("")
-    }
-
-    procedimentos_sel <- input$procedimento_cirurgia
-    if (length(procedimentos_sel) > 0) {
-      mapa <- dados()$mapa_especialidade_rol
-      nomes <- if (!is.null(mapa)) mapa[codigo_procedimento_principal %chin% procedimentos_sel]$nome_procedimento else procedimentos_sel
-      sufixo <- if (length(nomes) <= 2) paste(nomes, collapse = "; ") else paste0(length(nomes), " procedimentos selecionados")
-      paste0(" — ", especialidade_sel, " — ", sufixo)
-    } else {
-      paste0(" — ", especialidade_sel)
-    }
-  })
-
   output$subtitulo_ranking_cirurgia <- renderText({
     req(input$mes_ranking_cirurgia)
     mes_sel <- as.integer(input$mes_ranking_cirurgia)
@@ -2370,10 +2328,7 @@ server <- function(input, output, session) {
     } else {
       input$ano_ranking_cirurgia
     }
-    paste0(
-      rotulo_ranking_cirurgia(), " — ", rotulo_periodo, " — ", rotulo_local_cirurgia(),
-      rotulo_especialidade_ranking()
-    )
+    paste0(rotulo_ranking_cirurgia(), " — ", rotulo_periodo, " — ", rotulo_local_cirurgia())
   })
 
   output$tabela_ranking_cirurgia_csv <- handler_csv(ranking_cirurgia_top, "ranking_procedimentos_cirurgia")
