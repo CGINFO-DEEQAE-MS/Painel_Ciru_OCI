@@ -16,6 +16,7 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 - Gráficos mensais ("OCI geral", "Por mês de atendimento", "OCI por especialidade") sombreiam os últimos 3 meses com "Dados preliminares" — a base ainda não fechou essas competências (`sombra_dados_preliminares()`/`anotacao_dados_preliminares()` em `app.R`).
 - "Série histórica OCI": gráfico "OCI geral" (Total + uma linha por componente/modalidade, liga/desliga pela legenda, com marcação da virada de ano) e, abaixo, dois empilhados por componente — "Por ano" e "Por mês de atendimento".
 - "Série histórica OCI por especialidade": Geral + especialidade numa subaba própria, com filtros de Especialidade e Componente; abaixo, colunas empilhadas "Por especialidade e componente", com filtro próprio de Ano e de Componente (evita a barra ficar com espaço vazio enorme quando se esconde um componente pela legenda do Plotly — aqui ele já sai dos dados, e o gráfico reescala sozinho).
+- "Especialidade e Procedimentos": seletor de Especialidade (única) + Ano + Mês de atendimento ("Ano inteiro" ou um mês específico) + tabela com todos os procedimentos SIGTAP daquela especialidade/período (quantidade e financeiro) e, abaixo, gráfico empilhado "por mês de atendimento" só com os `TOP_N_PROCEDIMENTOS_OCI` (7) procedimentos mais frequentes do período/especialidade escolhidos. Gerado por `OCI/ranking_procedimentos_oci.R` (lê `resultados/bases_processadas/base_oci_limpo.rds`, já filtrado/limpo pelo script principal, em vez de reprocessar o `Dataset.csv`).
 - Filtro de Região (multisseleção) é uma lista suspensa, igual ao das outras abas.
 - Mesma lógica de filtro por região/UF/município do painel de cirurgias.
 - Todo valor financeiro de OCI é o **valor federal de referência** (valor aprovado − complemento do gestor local; só SIA — o CMD não tem valor). A análise é sempre por local/competência de **atendimento**; registros sem UF de atendimento (contatos do CMD) ficam em "NÃO INFORMADA" e entram só no total Brasil com as 5 regiões marcadas.
@@ -52,7 +53,7 @@ A aba "Variação Cirurgias" é diferente: os 3 mapas (`.gpkg`) vêm de um terce
 Cirurgia/resultados/02_monitoramento/tabelas/      serie_completa_*, serie_anos_* (inclui serie_anos_municipio_gestao_*, do script 10)
 Cirurgia/resultados/02_monitoramento/tabelas/      cirurgias_ranking_procedimento_uf_*, cirurgias_ranking_secundario_uf_* (script 11)
 Cirurgia/resultados/bases_processadas/fisico/      cirurgias_mensal_procedimento_rol_*.csv
-OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv
+OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv, oci_ranking_procedimento_*.csv
 Analise_Espacial/app_semaforo/dados/               tab_br/tab_regiao/tab_municipio *.gpkg
                           │
                           ▼   sincronizado toda vez que o app abre (sessão nova)
@@ -98,7 +99,7 @@ Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
 shiny::runApp()
 ```
 
-Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R`/`11_ranking_procedimentos_cirurgia.R` e `Monitoramento_oci_uf_2025_2026.R`), os dados sincronizam automaticamente para `dados/processados/`.
+Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R`/`11_ranking_procedimentos_cirurgia.R` e `Monitoramento_oci_uf_2025_2026.R`/`ranking_procedimentos_oci.R`), os dados sincronizam automaticamente para `dados/processados/`.
 
 Pacotes: shiny, bslib, plotly, DT, data.table, readxl, stringi, `shinyWidgets` (dropdown de Região), `officer`/`ggplot2`/`scales`/`rvg` (exportação PPTX) e `sf`/`dplyr`/`shinycssloaders`/`writexl` (mapas e Excel da aba "Variação Cirurgias").
 

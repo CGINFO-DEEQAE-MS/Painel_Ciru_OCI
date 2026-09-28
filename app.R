@@ -100,6 +100,10 @@ ORDEM_ESPECIALIDADES <- c(
   "Ortopedia", "Otorrinolaringologia", "Saúde Mulher"
 )
 
+# Quantos procedimentos entram no gráfico "por mês de atendimento" da
+# sub-aba "Especialidade e Procedimentos" (a tabela ao lado mostra todos).
+TOP_N_PROCEDIMENTOS_OCI <- 7L
+
 # Mesma paleta usada no script de origem (Monitoramento_oci_uf_2025_2026.R),
 # para manter a identidade visual entre o relatório estático e o painel.
 CORES_ESPECIALIDADE <- c(
@@ -515,6 +519,39 @@ carregar_oci_especialidade_componente_municipio <- function() {
   dt[]
 }
 
+# Ranking de procedimentos de OCI por Especialidade, grão UF x ano x mês x
+# procedimento — usado pela sub-aba "Especialidade e Procedimentos".
+# Gerado por OCI/ranking_procedimentos_oci.R.
+carregar_oci_ranking_procedimento_uf <- function() {
+
+  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^oci_ranking_procedimento_uf\\.csv$")
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, sep = ";", encoding = "UTF-8")
+  dt[, NM_UF := toupper(NM_UF)]
+  dt[]
+}
+
+# Mesmo esquema de carregar_oci_ranking_procedimento_uf(), granularidade de
+# município (sem a região "Não informada" — contatos sem UF/atendimento não
+# têm município).
+carregar_oci_ranking_procedimento_municipio <- function() {
+
+  arquivo <- localizar_arquivo(DIR_RESULT_OCI, "^oci_ranking_procedimento_municipio\\.csv$")
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, sep = ";", encoding = "UTF-8")
+  dt[, NM_UF := toupper(NM_UF)]
+  dt[, MUNICIPIO := toupper(MUNICIPIO)]
+  dt[]
+}
+
 # Copia as planilhas mais recentes dos projetos irmãos para dados/processados.
 # Só roda quando esses projetos existem localmente (dev no RStudio); no
 # shinyapps.io eles não existem e a função não faz nada, mantendo a última
@@ -564,7 +601,9 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_cirurgia, "^cirurgias_ranking_secundario_uf_.*\\.csv$"),
     localizar_arquivo(origem_oci, "^planilha_OCI_UF_mes_.*\\.xlsx$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
-    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_municipio\\.csv$")
+    localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_municipio\\.csv$"),
+    localizar_arquivo(origem_oci, "^oci_ranking_procedimento_uf\\.csv$"),
+    localizar_arquivo(origem_oci, "^oci_ranking_procedimento_municipio\\.csv$")
   )
   arquivos <- arquivos[!is.na(arquivos)]
 
@@ -640,7 +679,9 @@ carregar_tudo <- function() {
     portaria9810_limite = carregar_limite_portaria9810(),
     oci_serie = carregar_serie_oci(),
     oci_especialidade_componente_uf = carregar_oci_especialidade_componente_uf(),
-    oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio()
+    oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio(),
+    oci_ranking_procedimento_uf = carregar_oci_ranking_procedimento_uf(),
+    oci_ranking_procedimento_municipio = carregar_oci_ranking_procedimento_municipio()
   )
 
   dados$cirurgia_anos_total_pab <- somar_series_cirurgia(dados$cirurgia_anos_total, dados$cirurgia_anos_pab)
@@ -1202,6 +1243,34 @@ grafico_oci_componente_mes <- function(dados, titulo) {
     )
 }
 
+# Colunas empilhadas por mês de atendimento, uma cor por procedimento — só
+# os TOP_N_PROCEDIMENTOS_OCI procedimentos mais frequentes da especialidade
+# escolhida (o corte já vem pronto de dados_oci_procedimento_mes(), no
+# servidor — esta função só desenha).
+grafico_oci_procedimento_mes <- function(dados, titulo) {
+
+  d <- dados[order(competencia)]
+  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
+  d[, texto := paste0(NOME_PROCEDIMENTO, "<br>", rotulo_mes, "<br>OCI: ", label_pt_num(OCI))]
+
+  datas_unicas <- sort(unique(d$competencia))
+  y_max <- max(d[, .(total = sum(OCI, na.rm = TRUE)), by = competencia]$total, 0, na.rm = TRUE)
+
+  ggplot(d, aes(x = competencia, y = OCI, fill = NOME_PROCEDIMENTO, text = texto)) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
+    geom_col(width = 25) +
+    scale_fill_brewer(name = NULL, palette = "Set2") +
+    scale_x_date(breaks = datas_unicas, labels = rotular_mes_ano_pt(datas_unicas)) +
+    scale_y_continuous(labels = label_pt_num) +
+    labs(title = titulo, x = "Mês de atendimento", y = "OCI realizadas") +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = -45, hjust = 0),
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 13)
+    )
+}
+
 grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) {
 
   dg <- dados_geral[order(competencia)]
@@ -1650,6 +1719,7 @@ ui <- page_navbar(
            'grafico_cirurgia', 'grafico_comparacao_anos',
            'grafico_oci_componente', 'grafico_oci_componente_ano', 'grafico_oci_componente_mes',
            'grafico_oci_especialidade', 'grafico_oci_especialidade_componente',
+           'grafico_oci_procedimento_mes',
            'grafico_portaria9810_mensal', 'grafico_portaria9810_programa', 'grafico_portaria9810_limite'
          ].forEach(function (id) {
            var el = document.getElementById(id);
@@ -1999,6 +2069,40 @@ ui <- page_navbar(
           DTOutput("tabela_oci_especialidade_componente_fisico", height = "auto"),
           h6("Financeiro — valor federal de referência (R$)", style = "margin-top: 16px;"),
           DTOutput("tabela_oci_especialidade_componente_financeiro", height = "auto")
+        ),
+        tabPanel(
+          "Especialidade e Procedimentos",
+          br(),
+          fluidRow(
+            column(
+              4,
+              selectInput(
+                "especialidade_oci_procedimento", "Especialidade",
+                choices = ORDEM_ESPECIALIDADES, selected = ORDEM_ESPECIALIDADES[1]
+              )
+            ),
+            column(
+              4,
+              selectInput("ano_oci_procedimento", "Ano", choices = NULL)
+            ),
+            column(
+              4,
+              selectInput(
+                "mes_oci_procedimento", "Mês de atendimento",
+                choices = c("Ano inteiro" = "0"), selected = "0"
+              )
+            )
+          ),
+          div(class = "subtitulo mb-2", textOutput("subtitulo_oci_procedimento", inline = TRUE)),
+          DTOutput("tabela_oci_procedimento", height = "auto"),
+          div(
+            class = "mb-3 mt-2",
+            downloadButton("tabela_oci_procedimento_csv", "Dados (CSV)", class = "btn-sm btn-outline-secondary")
+          ),
+          br(),
+          h5(paste0("Top ", TOP_N_PROCEDIMENTOS_OCI, " procedimentos — por mês de atendimento")),
+          plotlyOutput("grafico_oci_procedimento_mes", height = "44vh"),
+          barra_downloads("grafico_oci_procedimento_mes")
         )
       )
     )
@@ -3523,7 +3627,147 @@ server <- function(input, output, session) {
     updateSelectInput(session, "componente_oci_sub", selected = "geral")
     updateCheckboxGroupInput(session, "anos_oci_especialidade_componente", selected = ANOS_OCI)
     updateCheckboxGroupInput(session, "componentes_oci_especialidade_componente", selected = ORDEM_COMPONENTES_OCI)
+    updateSelectInput(session, "especialidade_oci_procedimento", selected = ORDEM_ESPECIALIDADES[1])
+    anos_oci_ranking <- dados()$oci_ranking_procedimento_uf
+    if (!is.null(anos_oci_ranking)) {
+      updateSelectInput(session, "ano_oci_procedimento", selected = max(anos_oci_ranking$ano))
+    }
+    updateSelectInput(session, "mes_oci_procedimento", selected = "0")
   })
+
+  ## ---- OCI: Especialidade e Procedimentos ----
+  # Cascata Região/UF/Município igual às demais reactives de OCI, no grão
+  # de procedimento (código SIGTAP) — ver OCI/ranking_procedimentos_oci.R.
+  oci_ranking_procedimento_filtrada <- reactive({
+
+    if (municipio_oci_ativo()) {
+      base_mun <- dados()$oci_ranking_procedimento_municipio
+      validate(need(!is.null(base_mun), "Ranking de procedimentos de OCI (município) não encontrado. Rode ranking_procedimentos_oci.R no projeto OCI."))
+      return(base_mun[NM_UF == input$uf_oci & MUNICIPIO == input$municipio_oci])
+    }
+
+    base <- dados()$oci_ranking_procedimento_uf
+    validate(need(!is.null(base), "Ranking de procedimentos de OCI não encontrado. Rode ranking_procedimentos_oci.R no projeto OCI."))
+    req(input$uf_oci)
+    validate(need(length(input$regiao_oci) > 0, "Selecione ao menos uma região."))
+
+    if (input$uf_oci == "BRASIL") {
+      base[REGIAO %in% c(input$regiao_oci, if (oci_todas_regioes()) "Não informada")]
+    } else {
+      base[NM_UF == input$uf_oci]
+    }
+  })
+
+  observeEvent(dados(), {
+    ranking <- dados()$oci_ranking_procedimento_uf
+    if (is.null(ranking)) return()
+    anos <- sort(unique(ranking$ano), decreasing = TRUE)
+    updateSelectInput(session, "ano_oci_procedimento", choices = anos, selected = anos[1])
+    escolhas_mes <- c("Ano inteiro" = "0", setNames(as.character(1:12), MES_LABELS))
+    updateSelectInput(session, "mes_oci_procedimento", choices = escolhas_mes, selected = "0")
+  }, once = TRUE)
+
+  # Recorte de Ano/Mês, próprio desta sub-aba — reaproveitado pela tabela
+  # (soma o recorte inteiro) e pelo gráfico por mês (mantém ano/mês).
+  oci_procedimento_periodo <- reactive({
+
+    req(input$ano_oci_procedimento, input$mes_oci_procedimento)
+    ano_sel <- as.integer(input$ano_oci_procedimento)
+    mes_sel <- as.integer(input$mes_oci_procedimento)
+
+    d <- oci_ranking_procedimento_filtrada()[ano == ano_sel]
+    if (mes_sel > 0) {
+      d <- d[mes == mes_sel]
+    }
+    d
+  })
+
+  # Tabela: soma o Ano/Mês selecionados, só a especialidade escolhida — é o
+  # "número de procedimentos realizados dentro daquela OCI".
+  oci_procedimento_tabela <- reactive({
+
+    req(input$especialidade_oci_procedimento)
+
+    d <- oci_procedimento_periodo()[ESPECIALIDADE == input$especialidade_oci_procedimento]
+    validate(need(nrow(d) > 0, "Sem dados para a seleção atual."))
+
+    agregada <- d[
+      , .(Quantidade = sum(OCI, na.rm = TRUE), Financeiro = sum(VALOR, na.rm = TRUE)),
+      by = .(Codigo = CODIGO_PROCEDIMENTO, Procedimento = NOME_PROCEDIMENTO)
+    ]
+    setorder(agregada, -Quantidade)
+    agregada[]
+  })
+
+  output$subtitulo_oci_procedimento <- renderText({
+    req(input$mes_oci_procedimento)
+    mes_sel <- as.integer(input$mes_oci_procedimento)
+    rotulo_periodo <- if (mes_sel > 0) {
+      paste0(MES_LABELS[mes_sel], "/", input$ano_oci_procedimento)
+    } else {
+      input$ano_oci_procedimento
+    }
+    paste0(input$especialidade_oci_procedimento, " — ", rotulo_periodo, " — ", rotulo_local_oci())
+  })
+
+  output$tabela_oci_procedimento_csv <- handler_csv(oci_procedimento_tabela, "oci_procedimentos_especialidade")
+
+  output$tabela_oci_procedimento <- renderDT({
+    d <- oci_procedimento_tabela()
+    datatable(
+      d,
+      colnames = c("Código", "Procedimento", "Quantidade", "Financeiro (R$)"),
+      rownames = FALSE,
+      selection = "none",
+      fillContainer = FALSE,
+      height = "auto",
+      options = list(dom = "t", ordering = FALSE, paging = FALSE)
+    ) |>
+      formatRound("Quantidade", digits = 0, mark = ".", interval = 3) |>
+      formatCurrency("Financeiro", currency = "R$ ", interval = 3, mark = ".", digits = 0)
+  })
+
+  # Gráfico: mesma especialidade, por mês de atendimento — só os
+  # TOP_N_PROCEDIMENTOS_OCI procedimentos com mais OCI no período (o mesmo
+  # corte que já está no topo da tabela acima).
+  dados_oci_procedimento_mes <- reactive({
+
+    tabela <- oci_procedimento_tabela()
+    codigos_top <- head(tabela$Codigo, TOP_N_PROCEDIMENTOS_OCI)
+
+    d <- oci_procedimento_periodo()[
+      ESPECIALIDADE == input$especialidade_oci_procedimento & CODIGO_PROCEDIMENTO %in% codigos_top
+    ]
+
+    agregada <- d[
+      , .(OCI = sum(OCI, na.rm = TRUE)),
+      by = .(ano, mes, CODIGO_PROCEDIMENTO, NOME_PROCEDIMENTO)
+    ]
+    agregada[, competencia := as.Date(sprintf("%04d-%02d-01", ano, mes))]
+    validate(need(nrow(agregada) > 0, "Sem dados para a seleção atual."))
+
+    agregada[]
+  })
+
+  plot_oci_procedimento_mes <- reactive({
+    grafico_oci_procedimento_mes(
+      dados_oci_procedimento_mes(),
+      titulo = paste0(
+        "Top ", TOP_N_PROCEDIMENTOS_OCI, " procedimentos — ", input$especialidade_oci_procedimento,
+        " — ", input$ano_oci_procedimento, " — ", rotulo_local_oci()
+      )
+    )
+  })
+
+  output$grafico_oci_procedimento_mes <- renderPlotly({
+    ggplotly(plot_oci_procedimento_mes(), tooltip = "text") |>
+      limpar_legenda_plotly() |>
+      layout(legend = list(orientation = "h", y = -0.4), margin = list(b = 100)) |>
+      alta_resolucao("oci_procedimentos_mes")
+  })
+
+  output$grafico_oci_procedimento_mes_csv <- handler_csv(dados_oci_procedimento_mes, "oci_procedimentos_mes")
+  output$grafico_oci_procedimento_mes_pptx <- handler_pptx(plot_oci_procedimento_mes, "oci_procedimentos_mes")
 
   # Mesma base do gráfico "Produção mensal — 2025 vs 2026"
   # (dados_oci_mensal_anos()) — OCI só tem contagem física, sem toggle.
@@ -4012,6 +4256,8 @@ server <- function(input, output, session) {
     "grafico_oci_componente_mes_csv", "grafico_oci_componente_mes_pptx",
     "grafico_oci_especialidade_csv", "grafico_oci_especialidade_pptx",
     "grafico_oci_especialidade_componente_csv", "grafico_oci_especialidade_componente_pptx",
+    "tabela_oci_procedimento_csv",
+    "grafico_oci_procedimento_mes_csv", "grafico_oci_procedimento_mes_pptx",
     "grafico_portaria9810_mensal_csv", "grafico_portaria9810_mensal_pptx",
     "grafico_portaria9810_programa_csv", "grafico_portaria9810_programa_pptx",
     "grafico_portaria9810_limite_csv", "grafico_portaria9810_limite_pptx",
