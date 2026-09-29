@@ -1602,8 +1602,8 @@ info_fonte_dados_oci <- function() {
   div(
     class = "text-muted small mt-3",
     style = "line-height: 1.4;",
-    p("Fonte: DRAC/SAES/MS. Atualizado em 24/08/2026."),
-    p("Fonte: SIA (extração em 12/08/2026), e CMD (extração em 24/08/2026)."),
+    p("Fonte: DRAC/SAES/MS. Atualizado em 23/09/2026."),
+    p("Fonte: SIA (extração em 12/09/2026), e CMD (extração em 23/09/2026)."),
     p(tags$em("Sujeito a alterações."))
   )
 }
