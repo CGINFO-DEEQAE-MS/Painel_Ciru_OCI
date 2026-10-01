@@ -30,6 +30,9 @@ DIR_RESULT_OCI       <- DADOS_LOCAIS
 CIRURGIA_DIR_ORIGEM <- normalizePath(file.path("..", "Cirurgia"), mustWork = FALSE)
 OCI_DIR_ORIGEM      <- normalizePath(file.path("..", "OCI"), mustWork = FALSE)
 SEMAFORO_DIR_ORIGEM <- normalizePath(file.path("..", "Analise_Espacial", "app_semaforo", "dados"), mustWork = FALSE)
+CONSULTAS_EXAMES_DIR_ORIGEM <- normalizePath(file.path("..", "Consultas_Exames"), mustWork = FALSE)
+
+DIR_RESULT_CONSULTAS_EXAMES <- DADOS_LOCAIS
 
 DIR_SEMAFORO <- file.path(DADOS_LOCAIS, "semaforo")
 dir.create(DIR_SEMAFORO, recursive = TRUE, showWarnings = FALSE)
@@ -104,6 +107,26 @@ ORDEM_ESPECIALIDADES <- c(
 # sub-aba "Especialidade e Procedimentos" (a tabela ao lado mostra todos).
 TOP_N_PROCEDIMENTOS_OCI <- 7L
 
+# Mesma ideia, para o gráfico de linha "mais realizados por mês" da sub-aba
+# "Ranking de Exames" — a tabela de ranking ao lado mostra todos os 27
+# exames estratégicos.
+TOP_N_EXAMES_CE <- 5L
+
+# Agrupamento dos exames estratégicos eletivos, mesma classificação usada no
+# projeto Consultas_Exames (script 03_exportar_painel.R, a partir dos
+# comentários de 02_monitor_consultas_exames.R) — "Ressonância Magnética" e
+# "Tomografia Computadorizada" são modalidades de exame, não especialidades
+# médicas, mas o projeto de origem já agrupava assim.
+ORDEM_ESPECIALIDADES_CE <- c(
+  "Cardiologia", "Ginecologia", "Oftalmologia", "Oncologia", "Ortopedia",
+  "Otorrinolaringologia", "Ressonância Magnética", "Tomografia Computadorizada"
+)
+
+# Ordem de região da "Tabela Geral" de Consultas e Exames — mesma ordem da
+# planilha de referência do projeto Consultas_Exames (Centro-Oeste antes de
+# Sudeste), diferente da ordem padrão do resto do painel (UF_REF).
+ORDEM_REGIAO_CE <- c("Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul")
+
 # Mesma paleta usada no script de origem (Monitoramento_oci_uf_2025_2026.R),
 # para manter a identidade visual entre o relatório estático e o painel.
 CORES_ESPECIALIDADE <- c(
@@ -144,6 +167,15 @@ CORES_COMPONENTE_OCI <- c(
   "Carretas"                = "#0C3988",
   "Créditos Financeiros"    = "#39DAC7",
   "Equipes Volantes"        = "#60A6C4"
+)
+
+# Mesma ideia, para o detalhamento FAEC/Outros componentes dentro da OCI
+# nos gráficos de Consultas/Teleconsultas e Exames Estratégicos Eletivos
+# (coluna empilhada "Fora da OCI" + os dois sub-componentes).
+CORES_OCI_CE <- c(
+  "Fora da OCI"                     = "#1769AA",
+  "Dentro OCI (FAEC)"               = "#D64545",
+  "Dentro OCI — Outros componentes" = "#F5C242"
 )
 
 # Escolhas do filtro de componente na subaba "Série histórica OCI por
@@ -552,6 +584,29 @@ carregar_oci_ranking_procedimento_municipio <- function() {
   dt[]
 }
 
+# Consultas/Teleconsultas e Exames Estratégicos Eletivos (projeto
+# Consultas_Exames, script 03_exportar_painel.R) — grão UF x ano x mês x
+# [TIPO ou ESPECIALIDADE]. `padrao` casa o nome do arquivo; o resultado já
+# vem com NM_UF (nome por extenso, cruzado com UF_REF) e, no grão
+# município, MUNICIPIO em maiúsculo (mesma convenção dos demais loaders).
+carregar_consultas_exames <- function(padrao) {
+
+  arquivo <- localizar_arquivo(DIR_RESULT_CONSULTAS_EXAMES, padrao)
+
+  if (is.na(arquivo)) {
+    return(NULL)
+  }
+
+  dt <- fread(arquivo, sep = ";", encoding = "UTF-8")
+  dt <- merge(dt, UF_REF[, .(SG_UF, NM_UF_OCI)], by.x = "UF", by.y = "SG_UF", all.x = TRUE)
+  setnames(dt, "NM_UF_OCI", "NM_UF")
+  dt[, NM_UF := toupper(NM_UF)]
+  if ("MUNICIPIO" %in% names(dt)) {
+    dt[, MUNICIPIO := toupper(MUNICIPIO)]
+  }
+  dt[]
+}
+
 # Copia as planilhas mais recentes dos projetos irmãos para dados/processados.
 # Só roda quando esses projetos existem localmente (dev no RStudio); no
 # shinyapps.io eles não existem e a função não faz nada, mantendo a última
@@ -576,6 +631,9 @@ sincronizar_dados_locais <- function() {
     )
   }
   origem_oci <- file.path(OCI_DIR_ORIGEM, "resultados")
+  origem_consultas_exames <- file.path(
+    CONSULTAS_EXAMES_DIR_ORIGEM, "resultados", "consultas_exames", "tabelas"
+  )
 
   arquivos <- c(
     localizar_arquivo(origem_cirurgia, "^serie_completa_rol_.*\\.csv$"),
@@ -603,7 +661,12 @@ sincronizar_dados_locais <- function() {
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_uf\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_mensal_especialidade_componente_municipio\\.csv$"),
     localizar_arquivo(origem_oci, "^oci_ranking_procedimento_uf\\.csv$"),
-    localizar_arquivo(origem_oci, "^oci_ranking_procedimento_municipio\\.csv$")
+    localizar_arquivo(origem_oci, "^oci_ranking_procedimento_municipio\\.csv$"),
+    localizar_arquivo(origem_consultas_exames, "^painel_consultas_uf\\.csv$"),
+    localizar_arquivo(origem_consultas_exames, "^painel_consultas_municipio\\.csv$"),
+    localizar_arquivo(origem_consultas_exames, "^painel_exames_estrategicos_uf\\.csv$"),
+    localizar_arquivo(origem_consultas_exames, "^painel_exames_estrategicos_municipio\\.csv$"),
+    localizar_arquivo(origem_consultas_exames, "^painel_exames_ranking_procedimento_uf\\.csv$")
   )
   arquivos <- arquivos[!is.na(arquivos)]
 
@@ -681,7 +744,12 @@ carregar_tudo <- function() {
     oci_especialidade_componente_uf = carregar_oci_especialidade_componente_uf(),
     oci_especialidade_componente_municipio = carregar_oci_especialidade_componente_municipio(),
     oci_ranking_procedimento_uf = carregar_oci_ranking_procedimento_uf(),
-    oci_ranking_procedimento_municipio = carregar_oci_ranking_procedimento_municipio()
+    oci_ranking_procedimento_municipio = carregar_oci_ranking_procedimento_municipio(),
+    ce_consultas_uf = carregar_consultas_exames("^painel_consultas_uf\\.csv$"),
+    ce_consultas_municipio = carregar_consultas_exames("^painel_consultas_municipio\\.csv$"),
+    ce_exames_uf = carregar_consultas_exames("^painel_exames_estrategicos_uf\\.csv$"),
+    ce_exames_municipio = carregar_consultas_exames("^painel_exames_estrategicos_municipio\\.csv$"),
+    ce_exames_ranking_uf = carregar_consultas_exames("^painel_exames_ranking_procedimento_uf\\.csv$")
   )
 
   dados$cirurgia_anos_total_pab <- somar_series_cirurgia(dados$cirurgia_anos_total, dados$cirurgia_anos_pab)
@@ -1271,6 +1339,163 @@ grafico_oci_procedimento_mes <- function(dados, titulo) {
     )
 }
 
+# Linha por exame (um ponto por mês de competência) — os TOP_N_EXAMES_CE
+# exames estratégicos mais realizados no ano escolhido, na sub-aba
+# "Ranking de Exames" (o corte já vem pronto no servidor; esta função só
+# desenha). Sempre um único ano (12 pontos por linha, no máximo).
+grafico_exames_ranking_mes <- function(dados, titulo) {
+
+  d <- dados[order(competencia)]
+  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
+  d[, texto := paste0(NOME_PROCEDIMENTO, "<br>", rotulo_mes, "<br>Quantidade: ", label_pt_num(QTD_TOTAL))]
+
+  # Legenda com nome curto (sem o código SIGTAP na frente, truncado em 40
+  # caracteres) — alguns nomes de procedimento são longos demais e, por
+  # inteiro, estouram a legenda horizontal e colidem com o título do eixo X.
+  # O tooltip (`texto`, acima) continua com o nome completo.
+  d[, NOME_CURTO := sub("^\\d{8,10}\\s+", "", NOME_PROCEDIMENTO)]
+  d[, NOME_CURTO := fifelse(nchar(NOME_CURTO) > 40, paste0(substr(NOME_CURTO, 1, 40), "…"), NOME_CURTO)]
+
+  datas_unicas <- sort(unique(d$competencia))
+  y_max <- max(d$QTD_TOTAL, 0, na.rm = TRUE)
+
+  ggplot(d, aes(x = competencia, y = QTD_TOTAL, colour = NOME_CURTO, group = NOME_CURTO)) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
+    geom_line(linewidth = 1) +
+    geom_point(aes(text = texto), size = 0.01, alpha = 0) +
+    scale_colour_brewer(name = NULL, palette = "Set2") +
+    scale_x_date(breaks = datas_unicas, labels = rotular_mes_ano_pt(datas_unicas)) +
+    scale_y_continuous(labels = label_pt_num) +
+    expand_limits(y = 0) +
+    labs(title = titulo, x = "Mês de competência", y = "Quantidade") +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = -45, hjust = 0),
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 13)
+    )
+}
+
+# Colunas empilhadas (Fora da OCI / Dentro OCI FAEC / Dentro OCI — Outros
+# componentes) por mês de competência, com uma linha de % dentro da OCI no
+# eixo secundário — mesmo estilo visual do grafico_oci_componente_mes(),
+# adaptado para as duas primeiras sub-abas de "Consultas e Exames"
+# (Consultas/Teleconsultas e Exames Estratégicos Eletivos). `dados` tem
+# competencia (Date), TOTAL, FAEC, OUTROS e PCT_OCI, sempre em quantidade
+# (Físico) — o Financeiro não entra aqui porque as linhas "Secund. de OCI"
+# (FAEC/MAC) vêm com valor_federal = R$0 na base de origem (o valor fica
+# todo no procedimento principal). FAEC/OUTROS só têm dado real a partir
+# de 2025 — antes disso o trecho empilhado fica zerado e a barra é só
+# "Fora da OCI". A linha de % usa traço tracejado e cor neutra (mais clara
+# que as barras) para não competir visualmente com elas.
+grafico_consultas_exames_oci_mes <- function(dados, titulo, rotulo_eixo, fmt_valor) {
+
+  d <- dados[order(competencia)]
+  d[, FORA := TOTAL - FAEC - OUTROS]
+  d[, rotulo_mes := rotular_mes_ano_pt(competencia)]
+
+  dl <- melt(
+    d[, .(
+      competencia, rotulo_mes,
+      `Fora da OCI` = FORA,
+      `Dentro OCI (FAEC)` = FAEC,
+      `Dentro OCI — Outros componentes` = OUTROS
+    )],
+    id.vars = c("competencia", "rotulo_mes"), variable.name = "CATEGORIA", value.name = "valor"
+  )
+  dl[, CATEGORIA := factor(as.character(CATEGORIA), levels = names(CORES_OCI_CE))]
+  dl[, texto := paste0(CATEGORIA, "<br>", rotulo_mes, "<br>", rotulo_eixo, ": ", fmt_valor(valor))]
+
+  fmt_pct <- scales::label_number(accuracy = 0.1, decimal.mark = ",", suffix = "%")
+  d[, texto_pct := paste0(rotulo_mes, "<br>% dentro da OCI: ", fmt_pct(PCT_OCI))]
+
+  datas_unicas <- sort(unique(d$competencia))
+  y_max <- max(d$TOTAL, 0, na.rm = TRUE)
+  pct_max <- max(d$PCT_OCI, 0, na.rm = TRUE)
+  # Reescala a % para caber no eixo primário (até 95% da barra mais alta,
+  # com folga abaixo do teto do sombreado de "Dados preliminares"); o
+  # sec.axis() abaixo desfaz a conta só para os rótulos do eixo direito.
+  fator <- if (pct_max > 0) (y_max * 0.95) / pct_max else 1
+  d[, pct_y := PCT_OCI * fator]
+
+  ggplot() +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
+    geom_col(data = dl, aes(x = competencia, y = valor, fill = CATEGORIA, text = texto), width = 25) +
+    geom_line(
+      data = d, aes(x = competencia, y = pct_y, group = 1),
+      colour = "#8292A3", linewidth = 0.8, linetype = "dashed"
+    ) +
+    geom_point(
+      data = d, aes(x = competencia, y = pct_y, text = texto_pct),
+      colour = "#8292A3", size = 0.01, alpha = 0
+    ) +
+    scale_fill_manual(name = NULL, values = CORES_OCI_CE) +
+    scale_x_date(breaks = datas_unicas, labels = rotular_mes_ano_pt(datas_unicas)) +
+    scale_y_continuous(
+      labels = fmt_valor,
+      sec.axis = sec_axis(~ . / fator, name = "% dentro da OCI", labels = fmt_pct)
+    ) +
+    labs(title = titulo, x = "Mês de competência", y = rotulo_eixo) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = -45, hjust = 0),
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 13)
+    )
+}
+
+# Depois do ggplotly(), substitui os 2 últimos traces (a linha de % e o
+# ponto invisível que carrega o tooltip — sempre as 2 últimas camadas
+# adicionadas no ggplot, nessa ordem) por um eixo Y secundário de verdade:
+# o ggplotly() não converte sec_axis() do ggplot2 de forma confiável, então
+# o valor real (não reescalado) e o eixo y2 são aplicados à mão, só na
+# versão interativa — o PPTX usa o sec_axis() do ggplot2 direto, que
+# funciona bem no render estático (rvg::dml).
+eixo_secundario_percentual <- function(p, pct_valores, titulo_eixo = "% dentro da OCI") {
+  n <- length(p$x$data)
+  for (i in (n - 1):n) {
+    p$x$data[[i]]$y <- pct_valores
+    p$x$data[[i]]$yaxis <- "y2"
+  }
+  p$x$layout$yaxis2 <- list(
+    overlaying = "y", side = "right", title = list(text = titulo_eixo, font = list(color = "#8292A3", size = 12)),
+    tickfont = list(color = "#8292A3", size = 11),
+    ticksuffix = "%", showgrid = FALSE, zeroline = FALSE, rangemode = "tozero"
+  )
+  p
+}
+
+# Tabela "Geral" da aba Consultas e Exames: uma linha por UF, com um
+# cabeçalho de Região intercalado antes de cada grupo (linha sem valor) e
+# uma linha de total Brasil no fim — mesmo layout da planilha de referência
+# do projeto Consultas_Exames. `dados` já vem filtrado a um único ano.
+tabela_geral_consultas_exames <- function(dados, col_total, col_faec, col_outros, col_oci) {
+
+  d <- dados[
+    , .(
+      TOTAL = sum(get(col_total)), FAEC = sum(get(col_faec)),
+      OUTROS = sum(get(col_outros)), OCI = sum(get(col_oci))
+    ),
+    by = .(REGIAO, UF)
+  ]
+
+  linhas <- list()
+  for (reg in ORDEM_REGIAO_CE) {
+    sub <- d[REGIAO == reg]
+    if (nrow(sub) == 0L) next
+    setorder(sub, UF)
+    linhas[[length(linhas) + 1L]] <- data.table(
+      Linha = toupper(reg), TOTAL = NA_real_, FAEC = NA_real_, OUTROS = NA_real_, OCI = NA_real_
+    )
+    linhas[[length(linhas) + 1L]] <- sub[, .(Linha = UF, TOTAL, FAEC, OUTROS, OCI)]
+  }
+  linhas[[length(linhas) + 1L]] <- data.table(
+    Linha = "BRASIL", TOTAL = sum(d$TOTAL), FAEC = sum(d$FAEC), OUTROS = sum(d$OUTROS), OCI = sum(d$OCI)
+  )
+
+  rbindlist(linhas)
+}
+
 grafico_oci_especialidade <- function(dados_geral, dados_especialidade, titulo) {
 
   dg <- dados_geral[order(competencia)]
@@ -1608,6 +1833,16 @@ info_fonte_dados_oci <- function() {
   )
 }
 
+info_fonte_dados_ce <- function() {
+  div(
+    class = "text-muted small mt-3",
+    style = "line-height: 1.4;",
+    p("Fonte: SIA/SUS e SIH/SUS. Painel SUS360 — Panorama Clínico. Extração em 26/09/2026."),
+    p("Consultas/Teleconsultas e Exames Estratégicos: somente produção eletiva."),
+    p(tags$em("Sujeito a alterações."))
+  )
+}
+
 # Linha compacta de exportação abaixo de cada gráfico: dados brutos em CSV e
 # o mesmo gráfico como slide de PowerPoint totalmente editável (rvg::dml).
 # O PNG em alta resolução continua no ícone de câmera do Plotly.
@@ -1720,6 +1955,7 @@ ui <- page_navbar(
            'grafico_oci_componente', 'grafico_oci_componente_ano', 'grafico_oci_componente_mes',
            'grafico_oci_especialidade', 'grafico_oci_especialidade_componente',
            'grafico_oci_procedimento_mes',
+           'grafico_consultas_ce', 'grafico_exames_ce', 'grafico_ranking_exames_ce',
            'grafico_portaria9810_mensal', 'grafico_portaria9810_programa', 'grafico_portaria9810_limite'
          ].forEach(function (id) {
            var el = document.getElementById(id);
@@ -2103,6 +2339,119 @@ ui <- page_navbar(
           h5(paste0("Top ", TOP_N_PROCEDIMENTOS_OCI, " procedimentos — por mês de atendimento")),
           plotlyOutput("grafico_oci_procedimento_mes", height = "44vh"),
           barra_downloads("grafico_oci_procedimento_mes")
+        )
+      )
+    )
+  ),
+
+  nav_panel(
+    "Consultas e Exames",
+    layout_sidebar(
+      sidebar = sidebar(
+        open = "always", width = "310px",
+        sidebar_cabecalho("limpar_ce"),
+        pickerInput(
+          "regiao_ce", "Região",
+          choices = REGIOES, selected = REGIOES, multiple = TRUE,
+          options = pickerOptions(
+            actionsBox = TRUE, selectedTextFormat = "count > 2",
+            countSelectedText = "{0} regiões", noneSelectedText = "Nenhuma região"
+          )
+        ),
+        selectInput("uf_ce", "UF", choices = "BRASIL", selected = "BRASIL"),
+        selectInput(
+          "municipio_ce", "Município",
+          choices = c("Selecione uma UF" = "Todos"), selected = "Todos"
+        ),
+        selectInput(
+          "especialidade_ce", "Especialidade",
+          choices = c("Todas" = "Todas", ORDEM_ESPECIALIDADES_CE), selected = "Todas"
+        ),
+        caixa_info_sidebar(
+          "Filtro de Especialidade vale só para \"Exames Estratégicos\" (Consultas/Teleconsultas não tem essa quebra).",
+          "\"Ressonância Magnética\" e \"Tomografia Computadorizada\" são modalidades de exame, não especialidades médicas — mantidas como o projeto de origem já agrupava."
+        ),
+        info_fonte_dados_ce()
+      ),
+      cabecalho_conteudo("Consultas e Exames", textOutput("subtitulo_ce", inline = TRUE)),
+      kpi_grid(
+        kpi_card(textOutput("kpi_ce_titulo1", inline = TRUE), "kpi_ce_valor1", "kpi_ce_linha1"),
+        kpi_card("Dentro da OCI", "kpi_ce_valor2", "kpi_ce_linha2"),
+        kpi_card("% dentro da OCI", "kpi_ce_valor3", "kpi_ce_linha3"),
+        kpi_card("Taxa de expansão", "kpi_ce_valor4", "kpi_ce_linha4")
+      ),
+      div(class = "kpi-rodape", textOutput("kpi_ce_rodape", inline = TRUE)),
+      tabsetPanel(
+        id = "subaba_ce",
+        type = "tabs",
+        tabPanel(
+          "Consultas e Teleconsultas",
+          br(),
+          fluidRow(
+            column(3, selectInput("ano_fim_consultas_ce", "Até o ano", choices = NULL, width = "100%")),
+            column(4, selectInput("mes_fim_consultas_ce", "Até o mês", choices = NULL, width = "100%"))
+          ),
+          plotlyOutput("grafico_consultas_ce", height = "54vh"),
+          barra_downloads("grafico_consultas_ce")
+        ),
+        tabPanel(
+          "Exames Estratégicos Eletivos",
+          br(),
+          fluidRow(
+            column(3, selectInput("ano_fim_exames_ce", "Até o ano", choices = NULL, width = "100%")),
+            column(4, selectInput("mes_fim_exames_ce", "Até o mês", choices = NULL, width = "100%"))
+          ),
+          plotlyOutput("grafico_exames_ce", height = "54vh"),
+          barra_downloads("grafico_exames_ce"),
+          br(),
+          h5(paste0("Top ", TOP_N_EXAMES_CE, " exames mais realizados — por mês de competência")),
+          plotlyOutput("grafico_ranking_exames_ce", height = "44vh"),
+          barra_downloads("grafico_ranking_exames_ce")
+        ),
+        tabPanel(
+          "Ranking de Exames",
+          br(),
+          fluidRow(
+            column(3, selectInput("ano_ranking_exames_ce", "Ano", choices = NULL, width = "100%"))
+          ),
+          div(class = "subtitulo mb-2", textOutput("subtitulo_ranking_exames_ce", inline = TRUE)),
+          DTOutput("tabela_ranking_exames_ce", height = "auto"),
+          div(
+            class = "mb-3 mt-2",
+            downloadButton("tabela_ranking_exames_ce_csv", "Dados (CSV)", class = "btn-sm btn-outline-secondary")
+          )
+        ),
+        tabPanel(
+          "Tabela Geral",
+          br(),
+          fluidRow(
+            column(
+              4,
+              radioButtons(
+                "indicador_tabela_ce", NULL,
+                choices = c("Exames Estratégicos" = "exames", "Consultas/Teleconsultas" = "consultas"),
+                selected = "exames", inline = TRUE
+              )
+            ),
+            column(
+              4,
+              selectInput("ano_tabela_ce", "Ano", choices = NULL, width = "140px")
+            ),
+            column(
+              4,
+              radioButtons(
+                "metrica_tabela_ce", NULL,
+                choices = c("Físico" = "fisico", "Financeiro (R$)" = "financeiro"),
+                selected = "fisico", inline = TRUE
+              )
+            )
+          ),
+          div(class = "subtitulo mb-2", textOutput("subtitulo_tabela_ce", inline = TRUE)),
+          DTOutput("tabela_geral_ce", height = "auto"),
+          div(
+            class = "mb-3 mt-2",
+            downloadButton("tabela_geral_ce_csv", "Dados (CSV)", class = "btn-sm btn-outline-secondary")
+          )
         )
       )
     )
@@ -3888,6 +4237,464 @@ server <- function(input, output, session) {
     )
   })
 
+  ## ---- Consultas e Exames ----
+  # Mesma cascata Região/UF/Município da aba OCI. Especialidade só existe
+  # na base de Exames (coluna ESPECIALIDADE); Consultas ignora esse filtro
+  # (só tem 2 tipos fixos — Consulta/Teleconsulta —, sem quebra por área).
+
+  observeEvent(list(input$regiao_ce, dados()$ce_exames_uf), {
+    ufs_regiao <- sort(UF_REF[REGIAO %in% input$regiao_ce]$NM_UF_OCI)
+    escolhas <- setNames(c("BRASIL", ufs_regiao), c(rotulo_agregado(input$regiao_ce), ufs_regiao))
+    selecionado <- if (isTRUE(input$uf_ce %in% escolhas)) input$uf_ce else "BRASIL"
+    updateSelectInput(session, "uf_ce", choices = escolhas, selected = selecionado)
+  })
+
+  observeEvent(list(input$uf_ce, dados()$ce_exames_municipio), {
+    base_mun <- dados()$ce_exames_municipio
+    if (is.null(input$uf_ce) || input$uf_ce == "BRASIL" || is.null(base_mun)) {
+      updateSelectInput(session, "municipio_ce", choices = c("Selecione uma UF" = "Todos"), selected = "Todos")
+      return()
+    }
+    municipios <- sort(unique(base_mun[NM_UF == input$uf_ce]$MUNICIPIO))
+    escolhas <- setNames(c("Todos", municipios), c("Todos (UF inteira)", municipios))
+    selecionado <- if (isTRUE(input$municipio_ce %in% escolhas)) input$municipio_ce else "Todos"
+    updateSelectInput(session, "municipio_ce", choices = escolhas, selected = selecionado)
+  })
+
+  observeEvent(dados(), {
+    base <- dados()$ce_exames_uf
+    if (is.null(base)) return()
+    anos <- sort(unique(base$ANO), decreasing = TRUE)
+    updateSelectInput(session, "ano_tabela_ce", choices = anos, selected = anos[1])
+
+    ultimo_ano <- max(anos)
+    ultimo_mes <- max(base[ANO == ultimo_ano]$MES)
+    escolhas_mes_ce <- setNames(as.character(1:12), MES_LABELS)
+    escolhas_ano_ce <- sort(anos)
+    updateSelectInput(session, "ano_fim_consultas_ce", choices = escolhas_ano_ce, selected = ultimo_ano)
+    updateSelectInput(session, "mes_fim_consultas_ce", choices = escolhas_mes_ce, selected = as.character(ultimo_mes))
+    updateSelectInput(session, "ano_fim_exames_ce", choices = escolhas_ano_ce, selected = ultimo_ano)
+    updateSelectInput(session, "mes_fim_exames_ce", choices = escolhas_mes_ce, selected = as.character(ultimo_mes))
+    updateSelectInput(session, "ano_ranking_exames_ce", choices = anos, selected = anos[1])
+  }, once = TRUE)
+
+  municipio_ce_ativo <- reactive({
+    isTRUE(input$uf_ce != "BRASIL") && !is.null(input$municipio_ce) && input$municipio_ce != "Todos"
+  })
+
+  rotulo_local_ce <- reactive({
+    if (municipio_ce_ativo()) {
+      paste0(input$municipio_ce, " (", input$uf_ce, ")")
+    } else if (input$uf_ce == "BRASIL") {
+      rotulo_agregado(input$regiao_ce)
+    } else {
+      input$uf_ce
+    }
+  })
+
+  # Base filtrada por Região/UF/Município — reaproveitada por Consultas e
+  # Exames (`base_uf_nome`/`base_municipio_nome` escolhem qual das quatro
+  # tabelas carregadas usar). `respeitar_especialidade` só se aplica a
+  # Exames (única base com a coluna ESPECIALIDADE).
+  ce_filtrada <- function(base_uf_nome, base_municipio_nome, respeitar_especialidade) {
+
+    if (municipio_ce_ativo()) {
+      base_mun <- dados()[[base_municipio_nome]]
+      validate(need(!is.null(base_mun), "Tabela não encontrada. Rode o script 03_exportar_painel.R no projeto Consultas_Exames."))
+      d <- base_mun[NM_UF == input$uf_ce & MUNICIPIO == input$municipio_ce]
+    } else {
+      base <- dados()[[base_uf_nome]]
+      validate(need(!is.null(base), "Tabela não encontrada. Rode o script 03_exportar_painel.R no projeto Consultas_Exames."))
+      req(input$uf_ce)
+      validate(need(length(input$regiao_ce) > 0, "Selecione ao menos uma região."))
+      d <- if (input$uf_ce == "BRASIL") base[REGIAO %in% input$regiao_ce] else base[NM_UF == input$uf_ce]
+    }
+
+    if (respeitar_especialidade && isTRUE(!is.null(input$especialidade_ce) && input$especialidade_ce != "Todas")) {
+      d <- d[ESPECIALIDADE == input$especialidade_ce]
+    }
+
+    d
+  }
+
+  consultas_ce_filtrada <- reactive({
+    ce_filtrada("ce_consultas_uf", "ce_consultas_municipio", respeitar_especialidade = FALSE)
+  })
+
+  exames_ce_filtrada <- reactive({
+    ce_filtrada("ce_exames_uf", "ce_exames_municipio", respeitar_especialidade = TRUE)
+  })
+
+  # Série mensal (soma o que sobrar do filtro) — usada pelos gráficos de
+  # barra e pelos KPIs do topo da aba.
+  dados_consultas_mes <- reactive({
+    d <- consultas_ce_filtrada()[
+      , .(
+        QTD_TOTAL = sum(QTD_TOTAL), QTD_OCI_FAEC = sum(QTD_OCI_FAEC),
+        QTD_OCI_MAC = sum(QTD_OCI_MAC), QTD_OCI_TOTAL = sum(QTD_OCI_TOTAL)
+      ),
+      by = .(ano = ANO, mes = MES)
+    ]
+    validate(need(nrow(d) > 0, "Sem dados para a seleção atual."))
+    d[, competencia := as.Date(sprintf("%04d-%02d-01", ano, mes))]
+    d[]
+  })
+
+  dados_exames_mes <- reactive({
+    d <- exames_ce_filtrada()[
+      , .(
+        QTD_TOTAL = sum(QTD_TOTAL), QTD_OCI_FAEC = sum(QTD_OCI_FAEC),
+        QTD_OCI_MAC = sum(QTD_OCI_MAC), QTD_OCI_TOTAL = sum(QTD_OCI_TOTAL)
+      ),
+      by = .(ano = ANO, mes = MES)
+    ]
+    validate(need(nrow(d) > 0, "Sem dados para a seleção atual."))
+    d[, competencia := as.Date(sprintf("%04d-%02d-01", ano, mes))]
+    d[]
+  })
+
+  # Recorta uma série mensal para os 12 meses terminados em ano_fim/mes_fim
+  # (inclusive) — os gráficos de Consultas/Exames não mostram mais a série
+  # inteira (54+ meses), e sim uma janela de 1 ano que os filtros "Até o
+  # ano"/"Até o mês" deslizam. `col_ano`/`col_mes` permitem reaproveitar em
+  # tabelas com nomes de coluna diferentes (ex.: ANO/MES, maiúsculo).
+  janela_12_meses <- function(d, ano_fim, mes_fim, col_ano = "ano", col_mes = "mes") {
+    fim_idx <- ano_fim * 12L + mes_fim
+    inicio_idx <- fim_idx - 11L
+    d[(get(col_ano) * 12L + get(col_mes)) >= inicio_idx & (get(col_ano) * 12L + get(col_mes)) <= fim_idx]
+  }
+
+  # `dados_..._ce_grafico()` já aplica a janela de 12 meses — usada tanto
+  # pelo gráfico (sempre em Físico) quanto pelo CSV, pra exportar
+  # exatamente o que está desenhado.
+  dados_consultas_ce_grafico <- reactive({
+    req(input$ano_fim_consultas_ce, input$mes_fim_consultas_ce)
+    d <- janela_12_meses(
+      dados_consultas_mes(), as.integer(input$ano_fim_consultas_ce), as.integer(input$mes_fim_consultas_ce)
+    )
+    validate(need(nrow(d) > 0, "Sem dados para a janela selecionada."))
+    d2 <- d[, .(competencia, TOTAL = QTD_TOTAL, FAEC = QTD_OCI_FAEC, OUTROS = QTD_OCI_MAC)]
+    d2[, PCT_OCI := fifelse(TOTAL > 0, (FAEC + OUTROS) / TOTAL * 100, 0)]
+    d2[]
+  })
+
+  plot_consultas_ce <- reactive({
+    grafico_consultas_exames_oci_mes(
+      dados_consultas_ce_grafico(), titulo = paste0("Consultas e Teleconsultas — ", rotulo_local_ce()),
+      rotulo_eixo = "Quantidade", fmt_valor = label_pt_num
+    )
+  })
+
+  output$grafico_consultas_ce <- renderPlotly({
+    ggplotly(plot_consultas_ce(), tooltip = "text") |>
+      limpar_legenda_plotly() |>
+      eixo_secundario_percentual(dados_consultas_ce_grafico()$PCT_OCI) |>
+      layout(legend = list(orientation = "h", y = -0.35), margin = list(b = 110, r = 60)) |>
+      alta_resolucao("consultas_teleconsultas")
+  })
+
+  output$grafico_consultas_ce_csv <- handler_csv(dados_consultas_ce_grafico, "consultas_teleconsultas")
+  output$grafico_consultas_ce_pptx <- handler_pptx(plot_consultas_ce, "consultas_teleconsultas")
+
+  dados_exames_ce_grafico <- reactive({
+    req(input$ano_fim_exames_ce, input$mes_fim_exames_ce)
+    d <- janela_12_meses(
+      dados_exames_mes(), as.integer(input$ano_fim_exames_ce), as.integer(input$mes_fim_exames_ce)
+    )
+    validate(need(nrow(d) > 0, "Sem dados para a janela selecionada."))
+    d2 <- d[, .(competencia, TOTAL = QTD_TOTAL, FAEC = QTD_OCI_FAEC, OUTROS = QTD_OCI_MAC)]
+    d2[, PCT_OCI := fifelse(TOTAL > 0, (FAEC + OUTROS) / TOTAL * 100, 0)]
+    d2[]
+  })
+
+  plot_exames_ce <- reactive({
+    grafico_consultas_exames_oci_mes(
+      dados_exames_ce_grafico(), titulo = paste0("Exames Estratégicos Eletivos — ", rotulo_local_ce()),
+      rotulo_eixo = "Quantidade", fmt_valor = label_pt_num
+    )
+  })
+
+  output$grafico_exames_ce <- renderPlotly({
+    ggplotly(plot_exames_ce(), tooltip = "text") |>
+      limpar_legenda_plotly() |>
+      eixo_secundario_percentual(dados_exames_ce_grafico()$PCT_OCI) |>
+      layout(legend = list(orientation = "h", y = -0.35), margin = list(b = 110, r = 60)) |>
+      alta_resolucao("exames_estrategicos")
+  })
+
+  output$grafico_exames_ce_csv <- handler_csv(dados_exames_ce_grafico, "exames_estrategicos")
+  output$grafico_exames_ce_pptx <- handler_pptx(plot_exames_ce, "exames_estrategicos")
+
+  ## ---- Consultas e Exames: Ranking de Exames ----
+  # Fica no grão UF (não Município) — mesmo recorte que a aba OCI já usa na
+  # sub-aba "Especialidade e Procedimentos" (Região/UF/Especialidade da
+  # lateral; Município não se aplica aqui).
+
+  ce_exames_ranking_filtrada <- reactive({
+    base <- dados()$ce_exames_ranking_uf
+    validate(need(
+      !is.null(base),
+      "Ranking de exames não encontrado. Rode o script 03_exportar_painel.R no projeto Consultas_Exames."
+    ))
+    req(input$uf_ce)
+    validate(need(length(input$regiao_ce) > 0, "Selecione ao menos uma região."))
+    d <- if (input$uf_ce == "BRASIL") base[REGIAO %in% input$regiao_ce] else base[NM_UF == input$uf_ce]
+    if (isTRUE(!is.null(input$especialidade_ce) && input$especialidade_ce != "Todas")) {
+      d <- d[ESPECIALIDADE == input$especialidade_ce]
+    }
+    d
+  })
+
+  # Tabela: soma o ano inteiro escolhido, um ranking por exame.
+  ranking_exames_ano <- reactive({
+    req(input$ano_ranking_exames_ce)
+    d <- ce_exames_ranking_filtrada()[ANO == as.integer(input$ano_ranking_exames_ce)]
+    validate(need(nrow(d) > 0, "Sem dados para a seleção atual."))
+    agregada <- d[, .(Quantidade = sum(QTD_TOTAL)), by = .(Codigo = CODIGO, Procedimento = NOME_PROCEDIMENTO)]
+    setorder(agregada, -Quantidade)
+    agregada[]
+  })
+
+  output$subtitulo_ranking_exames_ce <- renderText({
+    req(input$ano_ranking_exames_ce)
+    esp <- if (isTRUE(!is.null(input$especialidade_ce) && input$especialidade_ce != "Todas")) {
+      paste0(input$especialidade_ce, " — ")
+    } else {
+      ""
+    }
+    paste0(esp, input$ano_ranking_exames_ce, " — ", rotulo_local_ce())
+  })
+
+  output$tabela_ranking_exames_ce_csv <- handler_csv(ranking_exames_ano, "exames_ranking_procedimento")
+
+  output$tabela_ranking_exames_ce <- renderDT({
+    d <- ranking_exames_ano()
+    datatable(
+      d,
+      colnames = c("Código", "Procedimento", "Quantidade"),
+      rownames = FALSE, selection = "none", fillContainer = FALSE, height = "auto",
+      options = list(dom = "t", ordering = FALSE, paging = FALSE)
+    ) |> formatRound("Quantidade", digits = 0, mark = ".", interval = 3)
+  })
+
+  # Gráfico: mora na sub-aba "Exames Estratégicos Eletivos", logo abaixo do
+  # gráfico de colunas empilhadas — segue a MESMA janela de 12 meses dele
+  # ("Até o ano"/"Até o mês" daquela sub-aba), não o Ano fixo da tabela de
+  # ranking acima. Só os TOP_N_EXAMES_CE exames mais realizados na janela.
+  dados_ranking_exames_mes <- reactive({
+    req(input$ano_fim_exames_ce, input$mes_fim_exames_ce)
+    d_janela <- janela_12_meses(
+      ce_exames_ranking_filtrada(), as.integer(input$ano_fim_exames_ce), as.integer(input$mes_fim_exames_ce),
+      col_ano = "ANO", col_mes = "MES"
+    )
+    validate(need(nrow(d_janela) > 0, "Sem dados para a janela selecionada."))
+
+    ranking <- d_janela[, .(QTD = sum(QTD_TOTAL)), by = .(CODIGO, NOME_PROCEDIMENTO)]
+    setorder(ranking, -QTD)
+    codigos_top <- head(ranking$CODIGO, TOP_N_EXAMES_CE)
+
+    agregada <- d_janela[
+      CODIGO %in% codigos_top,
+      .(QTD_TOTAL = sum(QTD_TOTAL)),
+      by = .(ano = ANO, mes = MES, NOME_PROCEDIMENTO)
+    ]
+    agregada[, competencia := as.Date(sprintf("%04d-%02d-01", ano, mes))]
+    validate(need(nrow(agregada) > 0, "Sem dados para a seleção atual."))
+    agregada[]
+  })
+
+  plot_ranking_exames_ce <- reactive({
+    grafico_exames_ranking_mes(
+      dados_ranking_exames_mes(),
+      titulo = paste0("Top ", TOP_N_EXAMES_CE, " exames — ", rotulo_local_ce())
+    )
+  })
+
+  output$grafico_ranking_exames_ce <- renderPlotly({
+    ggplotly(plot_ranking_exames_ce(), tooltip = "text") |>
+      limpar_legenda_plotly() |>
+      layout(legend = list(orientation = "h", y = -0.4), margin = list(b = 100)) |>
+      alta_resolucao("exames_ranking_mes")
+  })
+
+  output$grafico_ranking_exames_ce_csv <- handler_csv(dados_ranking_exames_mes, "exames_ranking_mes")
+  output$grafico_ranking_exames_ce_pptx <- handler_pptx(plot_ranking_exames_ce, "exames_ranking_mes")
+
+  output$subtitulo_ce <- renderText({ rotulo_local_ce() })
+
+  # KPIs seguem a sub-aba ativa (Consultas e Teleconsultas ou Exames
+  # Estratégicos — nas sub-abas "Ranking de Exames"/"Tabela Geral", que não
+  # têm indicador próprio, ficam em Exames) e o "Até o ano" já escolhido
+  # naquela sub-aba ("ano selecionado"). Sequência: quantidade do ano,
+  # quantidade dentro da OCI, % dentro da OCI, e taxa de expansão
+  # comparando o mesmo intervalo de meses (Jan–até o último mês disponível)
+  # entre o ano selecionado e o ano anterior.
+  kpi_ce <- reactive({
+
+    indicador_consultas <- isTRUE(input$subaba_ce == "Consultas e Teleconsultas")
+
+    if (indicador_consultas) {
+      req(input$ano_fim_consultas_ce)
+      ano_sel <- as.integer(input$ano_fim_consultas_ce)
+      d <- dados_consultas_mes()
+      titulo <- "Consultas e Teleconsultas"
+    } else {
+      req(input$ano_fim_exames_ce)
+      ano_sel <- as.integer(input$ano_fim_exames_ce)
+      d <- dados_exames_mes()
+      titulo <- "Exames Estratégicos Eletivos"
+    }
+
+    d_ano <- d[ano == ano_sel]
+    validate(need(nrow(d_ano) > 0, "Sem dados para o ano selecionado."))
+
+    qtd_total <- sum(d_ano$QTD_TOTAL)
+    qtd_oci <- sum(d_ano$QTD_OCI_TOTAL)
+    pct_oci <- if (qtd_total > 0) qtd_oci / qtd_total * 100 else NA_real_
+    mes_ultimo <- max(d_ano$mes)
+
+    ano_anterior <- ano_sel - 1L
+    total_sel <- sum(d[ano == ano_sel & mes <= mes_ultimo, ]$QTD_TOTAL)
+    total_anterior <- sum(d[ano == ano_anterior & mes <= mes_ultimo, ]$QTD_TOTAL)
+    tx_expansao <- if (total_anterior > 0) (total_sel / total_anterior - 1) * 100 else NA_real_
+
+    list(
+      titulo = titulo, ano_sel = ano_sel, ano_anterior = ano_anterior, mes_ultimo = mes_ultimo,
+      qtd_total = qtd_total, qtd_oci = qtd_oci, pct_oci = pct_oci, tx_expansao = tx_expansao
+    )
+  })
+
+  output$kpi_ce_titulo1 <- renderText({ paste0(kpi_ce()$titulo, " (", kpi_ce()$ano_sel, "*)") })
+  output$kpi_ce_valor1 <- renderText({ label_pt_num(kpi_ce()$qtd_total) })
+  output$kpi_ce_linha1 <- renderUI({
+    k <- kpi_ce()
+    kpi_linha(paste0("Jan–", MES_LABELS[k$mes_ultimo], "/", k$ano_sel))
+  })
+
+  output$kpi_ce_valor2 <- renderText({ label_pt_num(kpi_ce()$qtd_oci) })
+  output$kpi_ce_linha2 <- renderUI({
+    k <- kpi_ce()
+    kpi_linha(paste0("Jan–", MES_LABELS[k$mes_ultimo], "/", k$ano_sel))
+  })
+
+  output$kpi_ce_valor3 <- renderText({
+    k <- kpi_ce()
+    if (is.na(k$pct_oci)) return("—")
+    paste0(label_pt_num(k$pct_oci), "%")
+  })
+  output$kpi_ce_linha3 <- renderUI({
+    k <- kpi_ce()
+    kpi_linha(paste0("Jan–", MES_LABELS[k$mes_ultimo], "/", k$ano_sel))
+  })
+
+  output$kpi_ce_valor4 <- renderText({
+    k <- kpi_ce()
+    if (is.na(k$tx_expansao)) return("—")
+    sinal <- if (k$tx_expansao >= 0) "+" else ""
+    paste0(sinal, label_pt_num(k$tx_expansao), "%")
+  })
+  output$kpi_ce_linha4 <- renderUI({
+    k <- kpi_ce()
+    if (is.na(k$tx_expansao)) return(NULL)
+    kpi_linha(paste0(
+      "Jan–", MES_LABELS[k$mes_ultimo], "/", k$ano_anterior, " → Jan–", MES_LABELS[k$mes_ultimo], "/", k$ano_sel
+    ))
+  })
+
+  output$kpi_ce_rodape <- renderText({
+    k <- kpi_ce()
+    paste0(
+      "*", k$ano_sel, ": dados disponíveis até ", MES_LABELS[k$mes_ultimo], "/", k$ano_sel, "."
+    )
+  })
+
+  ## ---- Consultas e Exames: Tabela Geral ----
+
+  tabela_geral_ce_dados <- reactive({
+
+    req(input$ano_tabela_ce, input$indicador_tabela_ce, input$metrica_tabela_ce)
+    validate(need(length(input$regiao_ce) > 0, "Selecione ao menos uma região."))
+    ano_sel <- as.integer(input$ano_tabela_ce)
+    indicador_exames <- isTRUE(input$indicador_tabela_ce == "exames")
+
+    base <- if (indicador_exames) dados()$ce_exames_uf else dados()$ce_consultas_uf
+    validate(need(!is.null(base), "Tabela não encontrada. Rode o script 03_exportar_painel.R no projeto Consultas_Exames."))
+
+    # Tabela já é "por UF" — por isso não aplica o filtro de UF/Município da
+    # lateral (ficaria uma tabela de 1 linha); Região e Especialidade (só em
+    # Exames) continuam valendo.
+    d <- base[ANO == ano_sel & REGIAO %chin% input$regiao_ce]
+    if (indicador_exames && isTRUE(!is.null(input$especialidade_ce) && input$especialidade_ce != "Todas")) {
+      d <- d[ESPECIALIDADE == input$especialidade_ce]
+    }
+    validate(need(nrow(d) > 0, "Sem dados para a seleção atual."))
+
+    cols <- if (isTRUE(input$metrica_tabela_ce == "financeiro")) {
+      c("VALOR_TOTAL", "VALOR_OCI_FAEC", "VALOR_OCI_MAC", "VALOR_OCI_TOTAL")
+    } else {
+      c("QTD_TOTAL", "QTD_OCI_FAEC", "QTD_OCI_MAC", "QTD_OCI_TOTAL")
+    }
+
+    tabela_geral_consultas_exames(d, cols[1], cols[2], cols[3], cols[4])
+  })
+
+  output$subtitulo_tabela_ce <- renderText({
+    rotulo_ind <- if (input$indicador_tabela_ce == "exames") "Exames Estratégicos Eletivos" else "Consultas e Teleconsultas"
+    paste0(rotulo_ind, " — ", input$ano_tabela_ce)
+  })
+
+  output$tabela_geral_ce_csv <- handler_csv(tabela_geral_ce_dados, "consultas_exames_tabela_geral")
+
+  output$tabela_geral_ce <- renderDT({
+
+    d <- tabela_geral_ce_dados()
+    moeda <- isTRUE(input$metrica_tabela_ce == "financeiro")
+    rotulo_total <- if (moeda) "Valor Total" else "Qtd. Total"
+    rotulo_oci <- if (moeda) "Total dentro OCI (R$)" else "Total dentro OCI"
+
+    tabela <- datatable(
+      d,
+      colnames = c("UF", rotulo_total, "Dentro OCI (FAEC)", "Dentro OCI — Outros componentes", rotulo_oci),
+      rownames = FALSE, selection = "none", fillContainer = FALSE, height = "auto",
+      options = list(dom = "t", ordering = FALSE, paging = FALSE, pageLength = -1)
+    )
+
+    tabela <- if (moeda) {
+      formatCurrency(tabela, c("TOTAL", "FAEC", "OUTROS", "OCI"), currency = "R$ ", interval = 3, mark = ".", digits = 0)
+    } else {
+      formatRound(tabela, c("TOTAL", "FAEC", "OUTROS", "OCI"), digits = 0, mark = ".", interval = 3)
+    }
+
+    formatStyle(
+      tabela, c("Linha", "TOTAL", "FAEC", "OUTROS", "OCI"),
+      valueColumns = "Linha",
+      fontWeight = styleEqual(
+        c("BRASIL", toupper(ORDEM_REGIAO_CE)),
+        rep("bold", 1 + length(ORDEM_REGIAO_CE))
+      )
+    )
+  })
+
+  observeEvent(input$limpar_ce, {
+    updatePickerInput(session, "regiao_ce", selected = REGIOES)
+    updateSelectInput(session, "uf_ce", selected = "BRASIL")
+    updateSelectInput(session, "municipio_ce", selected = "Todos")
+    updateSelectInput(session, "especialidade_ce", selected = "Todas")
+    updateRadioButtons(session, "indicador_tabela_ce", selected = "exames")
+    updateRadioButtons(session, "metrica_tabela_ce", selected = "fisico")
+    anos_ce <- dados()$ce_exames_uf
+    if (!is.null(anos_ce)) {
+      ultimo_ano <- max(anos_ce$ANO)
+      ultimo_mes <- max(anos_ce[ANO == ultimo_ano]$MES)
+      updateSelectInput(session, "ano_tabela_ce", selected = ultimo_ano)
+      updateSelectInput(session, "ano_fim_consultas_ce", selected = ultimo_ano)
+      updateSelectInput(session, "mes_fim_consultas_ce", selected = as.character(ultimo_mes))
+      updateSelectInput(session, "ano_fim_exames_ce", selected = ultimo_ano)
+      updateSelectInput(session, "mes_fim_exames_ce", selected = as.character(ultimo_mes))
+      updateSelectInput(session, "ano_ranking_exames_ce", selected = ultimo_ano)
+    }
+  })
+
   ## ---- Pagamento Portaria 9810 ----
 
   # Popula UF e Componente a partir da base carregada (só uma vez — a base
@@ -4258,6 +5065,11 @@ server <- function(input, output, session) {
     "grafico_oci_especialidade_componente_csv", "grafico_oci_especialidade_componente_pptx",
     "tabela_oci_procedimento_csv",
     "grafico_oci_procedimento_mes_csv", "grafico_oci_procedimento_mes_pptx",
+    "grafico_consultas_ce_csv", "grafico_consultas_ce_pptx",
+    "grafico_exames_ce_csv", "grafico_exames_ce_pptx",
+    "tabela_ranking_exames_ce_csv",
+    "grafico_ranking_exames_ce_csv", "grafico_ranking_exames_ce_pptx",
+    "tabela_geral_ce_csv",
     "grafico_portaria9810_mensal_csv", "grafico_portaria9810_mensal_pptx",
     "grafico_portaria9810_programa_csv", "grafico_portaria9810_programa_pptx",
     "grafico_portaria9810_limite_csv", "grafico_portaria9810_limite_pptx",

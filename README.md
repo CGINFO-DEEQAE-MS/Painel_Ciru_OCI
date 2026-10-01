@@ -1,6 +1,6 @@
 # Painel para monitoramento da produção física e financeira ATE
 
-Painel em **R Shiny** para acompanhar mensalmente a produção física e financeira de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF), das **Ofertas de Cuidados Integrados (OCI)** e do **Pagamento Portaria 9810**.
+Painel em **R Shiny** para acompanhar mensalmente a produção física e financeira de **Cirurgias Eletivas** (ROL, Total e Programa PATE/PNRF), das **Ofertas de Cuidados Integrados (OCI)**, de **Consultas/Teleconsultas e Exames Estratégicos Eletivos** e do **Pagamento Portaria 9810**.
 
 ## Funcionalidades
 
@@ -20,6 +20,15 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 - Filtro de Região (multisseleção) é uma lista suspensa, igual ao das outras abas.
 - Mesma lógica de filtro por região/UF/município do painel de cirurgias.
 - Todo valor financeiro de OCI é o **valor federal de referência** (valor aprovado − complemento do gestor local; só SIA — o CMD não tem valor). A análise é sempre por local/competência de **atendimento**; registros sem UF de atendimento (contatos do CMD) ficam em "NÃO INFORMADA" e entram só no total Brasil com as 5 regiões marcadas.
+
+**Consultas e Exames**
+- Monitora a produção **eletiva** de Consultas/Teleconsultas em atenção especializada (códigos SIGTAP `0301010072`/`0301010307`) e de Exames Estratégicos Eletivos (27 códigos SIGTAP, agrupados em 8 especialidades/modalidades: Cardiologia, Ginecologia, Oftalmologia, Oncologia, Ortopedia, Otorrinolaringologia, Ressonância Magnética e Tomografia Computadorizada) — mesmas regras de negócio do projeto irmão `Consultas_Exames` (script `02_monitor_consultas_exames.R`).
+- Filtros: Região (multisseleção) + UF, Município (cascata) e, só para Exames, Especialidade (não se aplica a Consultas/Teleconsultas, que só têm "Tipo": Consulta médica x Teleconsulta).
+- 4 KPIs: Consultas e Teleconsultas (ano mais recente), Exames Estratégicos Eletivos (ano mais recente), Total dentro da OCI (soma Consultas + Exames) e Taxa de expansão anual dos Exames (mesmo padrão "último mês fechado" usado nas demais abas, com os 2 últimos meses tratados como preliminares).
+- Sub-abas "Consultas e Teleconsultas" e "Exames Estratégicos Eletivos": um gráfico de barras por mês de competência (Físico/Financeiro), com download em CSV e slide PPTX editável.
+- Sub-aba "Tabela Geral": tabela por UF (Qtd./Valor Total, Dentro OCI FAEC, Dentro OCI Outros componentes, Total dentro OCI), agrupada por região com total Brasil — alterna entre Consultas e Exames, Ano, e Físico/Financeiro; segue Região e Especialidade (quando Exames) da lateral, mas não UF/Município (a tabela já é, por natureza, uma quebra por UF).
+- Todo valor financeiro é o **valor federal de referência** (mesma métrica usada em Cirurgia/OCI).
+- Gerado por `Consultas_Exames/03_exportar_painel.R`, que lê a base processada por `01_preparar_base.R` deste mesmo projeto e grava CSVs compactos no grão UF × ano × mês × (Tipo/Especialidade).
 
 **Pagamento Portaria 9810**
 - Repasses da Portaria GM/MS nº 9.810/2025 (Agora Tem Especialistas). Só entram linhas com `NU_PORTARIA` 09810/9810 e só o Valor Líquido.
@@ -43,7 +52,7 @@ Todo gráfico tem, logo abaixo, **Dados (CSV)** (dados brutos) e **Slide editáv
 
 Dados públicos do Ministério da Saúde, plataforma **SUS360**: [Componente Ambulatorial (OCI)](https://sus360.saude.gov.br/#painel/componente-ambulatorial) e [Cirurgias Eletivas](https://sus360.saude.gov.br/painel/cirurgias/).
 
-Este painel **não acessa o SUS360 diretamente**: consome os arquivos já processados pelos projetos irmãos `Cirurgia` e `OCI`, com três exceções mantidas manualmente (não vêm do SUS360 nem de script): `dados/Relacao_cirugiasROL.xlsx` (Código SIGTAP → Especialidade), `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (pagamentos e limite da Portaria 9.810).
+Este painel **não acessa o SUS360 diretamente**: consome os arquivos já processados pelos projetos irmãos `Cirurgia`, `OCI` e `Consultas_Exames`, com três exceções mantidas manualmente (não vêm do SUS360 nem de script): `dados/Relacao_cirugiasROL.xlsx` (Código SIGTAP → Especialidade), `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (pagamentos e limite da Portaria 9.810).
 
 A aba "Variação Cirurgias" é diferente: os 3 mapas (`.gpkg`) vêm de um terceiro projeto irmão, `Analise_Espacial/app_semaforo`, já prontos com geometria e variação % calculada — este painel só copia e lê.
 
@@ -54,6 +63,7 @@ Cirurgia/resultados/02_monitoramento/tabelas/      serie_completa_*, serie_anos_
 Cirurgia/resultados/02_monitoramento/tabelas/      cirurgias_ranking_procedimento_uf_*, cirurgias_ranking_secundario_uf_* (script 11)
 Cirurgia/resultados/bases_processadas/fisico/      cirurgias_mensal_procedimento_rol_*.csv
 OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv, oci_ranking_procedimento_*.csv
+Consultas_Exames/resultados/consultas_exames/tabelas/  painel_consultas_uf.csv, painel_consultas_municipio.csv, painel_exames_estrategicos_uf.csv, painel_exames_estrategicos_municipio.csv
 Analise_Espacial/app_semaforo/dados/               tab_br/tab_regiao/tab_municipio *.gpkg
                           │
                           ▼   sincronizado toda vez que o app abre (sessão nova)
@@ -75,6 +85,10 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
 1. GitHub_SAES/
 ├── Cirurgia/
 ├── OCI/
+├── Consultas_Exames/
+│   └── resultados/
+│       └── consultas_exames/
+│           └── tabelas/                       # painel_consultas_*, painel_exames_estrategicos_*
 ├── Analise_Espacial/
 │   └── app_semaforo/
 │       └── dados/                             # tab_br/tab_regiao/tab_municipio *.gpkg
@@ -99,13 +113,13 @@ Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
 shiny::runApp()
 ```
 
-Na primeira execução, se `Cirurgia` e `OCI` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R`/`11_ranking_procedimentos_cirurgia.R` e `Monitoramento_oci_uf_2025_2026.R`/`ranking_procedimentos_oci.R`), os dados sincronizam automaticamente para `dados/processados/`.
+Na primeira execução, se `Cirurgia`, `OCI` e `Consultas_Exames` já tiverem sido processados (scripts `01_unificar_bases_cirurgias.R`/`02_monitoramento_diagrama_controle.R`/`10_series_gestao_comparacao_anos.R`/`11_ranking_procedimentos_cirurgia.R`, `Monitoramento_oci_uf_2025_2026.R`/`ranking_procedimentos_oci.R` e `01_preparar_base.R`/`03_exportar_painel.R`), os dados sincronizam automaticamente para `dados/processados/`.
 
 Pacotes: shiny, bslib, plotly, DT, data.table, readxl, stringi, `shinyWidgets` (dropdown de Região), `officer`/`ggplot2`/`scales`/`rvg` (exportação PPTX) e `sf`/`dplyr`/`shinycssloaders`/`writexl` (mapas e Excel da aba "Variação Cirurgias").
 
 ## Publicar / atualizar no shinyapps.io
 
-1. Rode os scripts de tratamento em `Cirurgia` e `OCI` para atualizar a competência mais recente;
+1. Rode os scripts de tratamento em `Cirurgia`, `OCI` e `Consultas_Exames` (`01_preparar_base.R` seguido de `03_exportar_painel.R`) para atualizar a competência mais recente;
 2. Abra e rode este app localmente uma vez, para sincronizar `dados/processados/`;
 3. No RStudio, com `app.R` aberto, clique em **Publish**. Numa conta nova (sem deploy anterior), use a seta ao lado do botão → **Other Destination** para escolher a conta antes de criar o app — clicar direto tende a reaproveitar a última conta/app usados;
 4. Confirme que **todos os arquivos de `dados/processados/`** estão marcados — incluindo `processados/semaforo/` (3 `.gpkg`, ~23MB, fácil de esquecer) — mais os três xlsx manuais de `dados/` — e nenhum `.RData`, se aparecer.
