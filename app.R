@@ -403,11 +403,16 @@ carregar_mapa_especialidade_rol <- function() {
 }
 
 # Pagamentos da Portaria nº 9.810 (Valor Líquido), mantido manualmente em
-# dados/BaseValorliquidoPortaria9810.xlsx (não vem de projeto irmão — é uma
-# planilha de referência própria do painel). Regra fixa da aba: o arquivo
+# dados/Base_pagamento/ (não vem de projeto irmão — é uma planilha de
+# referência própria do painel, extraída do Painel FAF/InvestSUS — ver nota
+# na sidebar da aba). Pega sempre o .xlsx mais recente da pasta, já que o
+# nome do arquivo muda a cada nova exportação. Regra fixa da aba: o arquivo
 # bruto traz outras portarias misturadas, então só entram linhas com
-# NU_PORTARIA 09810/9810. Data de pagamento = ANO + MÊS (coluna de texto,
-# ex. "set").
+# NU_PORTARIA 09810/9810 — a Portaria GM/MS nº 12.174/2026, que alterou o
+# limite da 9.810, não trouxe um novo código de portaria na execução
+# financeira (conferido na extração de 03/10/2026: só aparecem "09810" e
+# "9810"), então esse filtro continua correto. Data de pagamento = ANO +
+# MÊS (coluna de texto, ex. "set").
 # Resume os valores da coluna PROGRAMA (nomes longos e técnicos) nos 5
 # rótulos usados como filtro de Componente no painel. FAEC - PMAE e FAEC
 # PNRF levam "*" porque são Despesa de Exercício Anterior (ver nota na
@@ -428,9 +433,9 @@ mapear_programa_portaria9810 <- function(programa) {
 
 carregar_portaria9810 <- function() {
 
-  arquivo <- file.path("dados", "BaseValorliquidoPortaria9810.xlsx")
+  arquivo <- localizar_arquivo(file.path("dados", "Base_pagamento"), "\\.xlsx$")
 
-  if (!file.exists(arquivo)) {
+  if (is.na(arquivo)) {
     return(NULL)
   }
 
@@ -459,11 +464,12 @@ carregar_portaria9810 <- function() {
   dt[]
 }
 
-# Limite de repasse por UF definido na Portaria nº 9.810, mantido
-# manualmente em dados/PORTARIA_9.810_UF.xlsx.
+# Limite de repasse por UF — Anexo da Portaria nº 9.810 com a redação dada
+# pela Portaria GM/MS nº 12.174/2026 (ver nota na aba), mantido manualmente
+# em dados/PORTARIA_12.174_UF.xlsx.
 carregar_limite_portaria9810 <- function() {
 
-  arquivo <- file.path("dados", "PORTARIA_9.810_UF.xlsx")
+  arquivo <- file.path("dados", "PORTARIA_12.174_UF.xlsx")
 
   if (!file.exists(arquivo)) {
     return(NULL)
@@ -1646,8 +1652,10 @@ grafico_portaria9810_mensal <- function(dados, titulo) {
 
   datas_unicas <- sort(unique(d$DATA_PAGAMENTO))
   cores_legenda <- setNames(unname(CORES_TIPO_GESTAO), stri_trans_totitle(names(CORES_TIPO_GESTAO)))
+  y_max <- max(d[, .(total = sum(valor, na.rm = TRUE)), by = DATA_PAGAMENTO]$total, 0, na.rm = TRUE)
 
   ggplot(d, aes(x = DATA_PAGAMENTO, y = valor, fill = tipo_rotulo, text = texto)) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
     geom_col(width = 25) +
     scale_fill_manual(name = NULL, values = cores_legenda) +
     scale_x_date(breaks = datas_unicas, labels = rotular_mes_ano_pt(datas_unicas)) +
@@ -1676,6 +1684,7 @@ grafico_portaria9810_programa <- function(dados, titulo) {
   d <- dados[order(DATA_PAGAMENTO)]
   d[, COMPONENTE := as.character(COMPONENTE)]
   datas_unicas <- sort(unique(d$DATA_PAGAMENTO))
+  y_max <- max(d$valor, 0, na.rm = TRUE)
 
   categorias <- unique(c(names(CORES_PROGRAMA_PORTARIA9810), d$COMPONENTE))
   categorias <- categorias[categorias %in% d$COMPONENTE]
@@ -1693,6 +1702,7 @@ grafico_portaria9810_programa <- function(dados, titulo) {
   d[, texto := paste0(COMPONENTE, "<br>", rotular_mes_ano_pt(DATA_PAGAMENTO), "<br>", label_pt_moeda(valor))]
 
   ggplot(d, aes(x = DATA_PAGAMENTO, y = valor, colour = COMPONENTE, group = COMPONENTE, text = texto)) +
+    sombra_dados_preliminares_gg(datas_unicas, y_max) +
     geom_line(linewidth = 1.1) +
     geom_point(size = 1.8) +
     scale_colour_manual(name = NULL, values = cores_legenda) +
@@ -2478,15 +2488,29 @@ ui <- page_navbar(
         ),
         caixa_info_sidebar(
           "Considera somente pagamentos da Portaria nº 9.810 (Valor Líquido).",
-          "* Despesa de Exercício Anterior."
+          "* Despesa de Exercício Anterior.",
+          tagList(
+            "Fonte da execução financeira (Pagamentos): Painel FAF/InvestSUS",
+            tags$a(
+              href = "https://investsuspaineis.saude.gov.br/extensions/CGIN_Painel_FAF/CGIN_Painel_FAF.html",
+              target = "_blank", "(acessar)"
+            ),
+            ", extração em 03/10/2026 — filtros considerados: Ano 2026, os 5 códigos de Programa do Agora Tem",
+            " Especialistas (Componente Ambulatorial, Componente Cirúrgico, Mutirão, FAEC - PMAE e FAEC -",
+            " Redução das Filas — mesma classificação de Componente usada neste painel), todas as UF, com",
+            " filtro para a Portaria 9.810."
+          )
         )
       ),
-      cabecalho_conteudo("Pagamento Portaria 9810", textOutput("subtitulo_portaria9810", inline = TRUE)),
+      cabecalho_conteudo(
+        "Limite financeiro para execução do Programa Agora Tem Especialistas",
+        textOutput("subtitulo_portaria9810", inline = TRUE)
+      ),
       kpi_grid(
         kpi_card("Valor pago no período", "kpi_portaria_valor_periodo", "kpi_portaria_valor_periodo_linha"),
         kpi_card("Maior pagamento mensal", "kpi_portaria_maior_mes", "kpi_portaria_maior_mes_linha"),
         kpi_card("Último mês de pagamento", "kpi_portaria_ultimo_mes", "kpi_portaria_ultimo_mes_linha"),
-        kpi_card("Variação no período", "kpi_portaria_variacao", "kpi_portaria_variacao_linha")
+        kpi_card("Componente com maior pagamento", "kpi_portaria_componente_top", "kpi_portaria_componente_top_linha")
       ),
       tabsetPanel(
         id = "subaba_portaria9810",
@@ -2506,11 +2530,19 @@ ui <- page_navbar(
           DTOutput("tabela_portaria9810_uf")
         ),
         tabPanel(
-          "Limite da Portaria 9810",
+          "Limite da Portaria",
           br(),
           div(
             class = "text-muted small mb-2", style = "line-height: 1.3;",
-            "O limite da Portaria 9.810 é definido por UF inteira (todos os municípios e tipos de gestão) — os filtros de Município e Tipo de Gestão não se aplicam aqui."
+            "O limite da Portaria é definido por UF inteira (todos os municípios e tipos de gestão) — os filtros de Município e Tipo de Gestão não se aplicam aqui."
+          ),
+          div(
+            class = "text-muted small mb-2", style = "line-height: 1.3;",
+            tags$em(
+              "Nota: este limite considera a Portaria GM/MS nº 12.174, de 21 de setembro de 2026, que altera o",
+              " Anexo da Portaria GM/MS nº 9.810, de 27 de dezembro de 2025, que estabelece o limite financeiro",
+              " para execução do Programa Agora Tem Especialistas — Componentes Ambulatorial e Cirúrgico, em 2026."
+            )
           ),
           h5("Valor pago x limite por UF"),
           plotlyOutput("grafico_portaria9810_limite", height = "58vh"),
@@ -4755,7 +4787,7 @@ server <- function(input, output, session) {
   portaria9810_filtrada <- reactive({
 
     base <- dados()$portaria9810
-    validate(need(!is.null(base), "Base de pagamentos da Portaria 9.810 não encontrada em dados/BaseValorliquidoPortaria9810.xlsx."))
+    validate(need(!is.null(base), "Base de pagamentos da Portaria 9.810 não encontrada em dados/Base_pagamento/."))
 
     validate(need(length(input$tipo_gestao_portaria9810) > 0, "Selecione ao menos um tipo de gestão."))
     validate(need(length(input$componente_portaria9810) > 0, "Selecione ao menos um componente."))
@@ -4774,12 +4806,26 @@ server <- function(input, output, session) {
     base
   })
 
+  # Tira os meses iniciais com valor líquido zerado (ex.: jan/2026, que só
+  # teve 3 lançamentos municipais do Componente Cirúrgico com desconto
+  # igual ao valor bruto — líquido R$0) — eles só deixavam a ponta do
+  # gráfico vazia, sem nenhum pagamento de verdade pra mostrar.
+  remover_meses_zerados_no_inicio <- function(d) {
+    totais <- d[, .(total = sum(valor, na.rm = TRUE)), by = DATA_PAGAMENTO]
+    meses_validos <- totais[total > 0]$DATA_PAGAMENTO
+    if (length(meses_validos) == 0) {
+      return(d)
+    }
+    d[DATA_PAGAMENTO >= min(meses_validos)]
+  }
+
   dados_portaria9810_mensal <- reactive({
 
     base <- portaria9810_filtrada()
     validate(need(nrow(base) > 0, "Sem dados para a seleção atual."))
 
-    base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, TIPO_GESTAO)]
+    d <- base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, TIPO_GESTAO)]
+    remover_meses_zerados_no_inicio(d)
   })
 
   plot_portaria9810_mensal <- reactive({
@@ -4801,7 +4847,8 @@ server <- function(input, output, session) {
     base <- portaria9810_filtrada()
     validate(need(nrow(base) > 0, "Sem dados para a seleção atual."))
 
-    base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, COMPONENTE)]
+    d <- base[, .(valor = sum(VALOR_LIQUIDO, na.rm = TRUE)), by = .(DATA_PAGAMENTO, COMPONENTE)]
+    remover_meses_zerados_no_inicio(d)
   })
 
   plot_portaria9810_programa <- reactive({
@@ -4841,7 +4888,7 @@ server <- function(input, output, session) {
       formatCurrency(colunas_valor, currency = "R$ ", interval = 3, mark = ".", digits = 0)
   })
 
-  # "Limite da Portaria 9810": sempre por UF inteira (soma Estadual +
+  # "Limite da Portaria": sempre por UF inteira (soma Estadual +
   # Municipal, todos os municípios e componentes) — o limite da portaria não
   # discrimina por tipo de gestão/município, então só o filtro de UF (para
   # focar em um estado) se aplica aqui.
@@ -4913,7 +4960,7 @@ server <- function(input, output, session) {
   ## ---- Portaria 9810: cabeçalho institucional (subtítulo, "limpar filtros" e KPIs) ----
 
   output$subtitulo_portaria9810 <- renderText({
-    rotulo_local_portaria9810()
+    paste0("Componentes Ambulatorial e Cirúrgico, em 2026 — ", rotulo_local_portaria9810())
   })
 
   observeEvent(input$limpar_portaria9810, {
@@ -4923,9 +4970,9 @@ server <- function(input, output, session) {
   })
 
   # A série da Portaria 9.810 é curta e cabe dentro de um único ano — por
-  # isso os KPIs aqui comparam primeiro x último mês disponível, em vez de
-  # "mesmo mês, ano anterior" como nas outras abas (não faria sentido com
-  # tão poucos meses de histórico).
+  # isso os KPIs de mês aqui comparam primeiro x último mês disponível, em
+  # vez de "mesmo mês, ano anterior" como nas outras abas (não faria
+  # sentido com tão poucos meses de histórico).
   kpi_portaria9810 <- reactive({
 
     d <- dados_portaria9810_mensal()
@@ -4939,11 +4986,13 @@ server <- function(input, output, session) {
     maior_linha <- d_mes[which.max(valor)]
     ultima_linha <- d_mes[which.max(DATA_PAGAMENTO)]
     primeira_linha <- d_mes[which.min(DATA_PAGAMENTO)]
-    variacao <- if (isTRUE(primeira_linha$valor > 0)) (ultima_linha$valor / primeira_linha$valor - 1) * 100 else NA_real_
+
+    d_componente <- dados_portaria9810_programa()[, .(valor = sum(valor, na.rm = TRUE)), by = COMPONENTE]
+    componente_top <- if (nrow(d_componente) > 0) d_componente[which.max(valor)] else NULL
 
     list(
       total_periodo = total_periodo, maior_linha = maior_linha,
-      ultima_linha = ultima_linha, primeira_linha = primeira_linha, variacao = variacao
+      ultima_linha = ultima_linha, primeira_linha = primeira_linha, componente_top = componente_top
     )
   })
 
@@ -4977,20 +5026,18 @@ server <- function(input, output, session) {
     kpi_linha(rotular_mes_ano_pt(k$ultima_linha$DATA_PAGAMENTO))
   })
 
-  output$kpi_portaria_variacao <- renderText({
+  output$kpi_portaria_componente_top <- renderText({
     k <- kpi_portaria9810()
-    if (is.na(k$variacao)) return("—")
-    sinal <- if (k$variacao >= 0) "+" else ""
-    paste0(sinal, label_pt_num(k$variacao), "%")
+    if (is.null(k$componente_top)) return("—")
+    as.character(k$componente_top$COMPONENTE)
   })
-  output$kpi_portaria_variacao_linha <- renderUI({
+  output$kpi_portaria_componente_top_linha <- renderUI({
     k <- kpi_portaria9810()
-    if (is.na(k$variacao)) return(NULL)
-    classe <- if (k$variacao >= 0) "positiva" else "negativa"
-    kpi_linha(
-      paste0(rotular_mes_ano_pt(k$primeira_linha$DATA_PAGAMENTO), " → ", rotular_mes_ano_pt(k$ultima_linha$DATA_PAGAMENTO)),
-      classe = classe
-    )
+    if (is.null(k$componente_top)) return(NULL)
+    kpi_linha(paste0(
+      label_pt_moeda(k$componente_top$valor), " · ",
+      rotular_mes_ano_pt(k$primeira_linha$DATA_PAGAMENTO), " – ", rotular_mes_ano_pt(k$ultima_linha$DATA_PAGAMENTO)
+    ))
   })
 
   ## ---- Exportação de dados (CSV) dos 8 gráficos ----

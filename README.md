@@ -30,12 +30,13 @@ Painel em **R Shiny** para acompanhar mensalmente a produção física e finance
 - Todo valor financeiro é o **valor federal de referência** (mesma métrica usada em Cirurgia/OCI).
 - Gerado por `Consultas_Exames/03_exportar_painel.R`, que lê a base processada por `01_preparar_base.R` deste mesmo projeto e grava CSVs compactos no grão UF × ano × mês × (Tipo/Especialidade).
 
-**Pagamento Portaria 9810**
-- Repasses da Portaria GM/MS nº 9.810/2025 (Agora Tem Especialistas). Só entram linhas com `NU_PORTARIA` 09810/9810 e só o Valor Líquido.
+**Pagamento Port.** (título de conteúdo: "Limite financeiro para execução do Programa Agora Tem Especialistas - Componentes Ambulatorial e Cirúrgico, em 2026")
+- Repasses da Portaria GM/MS nº 9.810/2025 (Agora Tem Especialistas), com o limite atualizado pela Portaria GM/MS nº 12.174, de 21/09/2026 (ver nota explícita na sub-aba "Limite da Portaria"). Só entram linhas com `NU_PORTARIA` 09810/9810 e só o Valor Líquido — a Portaria 12.174 não criou um novo código de portaria na execução financeira (conferido na extração de 03/10/2026), só alterou o Anexo de limites.
+- Base de execução financeira (pagamentos) mantida manualmente em `dados/Base_pagamento/` (sempre o `.xlsx` mais recente da pasta — o nome do arquivo muda a cada nova exportação), extraída do [Painel FAF/InvestSUS](https://investsuspaineis.saude.gov.br/extensions/CGIN_Painel_FAF/CGIN_Painel_FAF.html) com os filtros: Ano 2026, os 5 códigos de Programa do Agora Tem Especialistas, todas as UF, filtro para a Portaria 9.810 (ver nota na sidebar da aba, com a data da extração).
 - Filtros: UF, Município (cascata), Tipo de Gestão e Componente — este último resumido em 5 rótulos a partir da coluna `PROGRAMA` (ver `mapear_programa_portaria9810()`); os com "*" são Despesa de Exercício Anterior.
 - Usa mês de **pagamento**, não mês de competência.
 - "Pagamentos": total por mês empilhado por Tipo de Gestão, linha por Componente, tabela por UF (Estadual/Municipal/Total).
-- "Limite da Portaria 9810": pago x limite por UF inteira (`dados/PORTARIA_9.810_UF.xlsx`, soma Estadual+Municipal — Município e Tipo de Gestão não se aplicam aqui), com destaque para quem ultrapassou.
+- "Limite da Portaria": pago x limite por UF inteira (`dados/PORTARIA_12.174_UF.xlsx`, soma Estadual+Municipal — Município e Tipo de Gestão não se aplicam aqui), com destaque para quem ultrapassou.
 
 **Variação Cirurgias**
 - Aba trazida do projeto irmão `Analise_Espacial/app_semaforo` — mapas coropléticos da variação % de procedimentos entre 2025 e 2026, em 5 faixas de cor (Queda forte → Alta forte).
@@ -52,7 +53,7 @@ Todo gráfico tem, logo abaixo, **Dados (CSV)** (dados brutos) e **Slide editáv
 
 Dados públicos do Ministério da Saúde, plataforma **SUS360**: [Componente Ambulatorial (OCI)](https://sus360.saude.gov.br/#painel/componente-ambulatorial) e [Cirurgias Eletivas](https://sus360.saude.gov.br/painel/cirurgias/).
 
-Este painel **não acessa o SUS360 diretamente**: consome os arquivos já processados pelos projetos irmãos `Cirurgia`, `OCI` e `Consultas_Exames`, com três exceções mantidas manualmente (não vêm do SUS360 nem de script): `dados/Relacao_cirugiasROL.xlsx` (Código SIGTAP → Especialidade), `dados/BaseValorliquidoPortaria9810.xlsx` e `dados/PORTARIA_9.810_UF.xlsx` (pagamentos e limite da Portaria 9.810).
+Este painel **não acessa o SUS360 diretamente**: consome os arquivos já processados pelos projetos irmãos `Cirurgia`, `OCI` e `Consultas_Exames`, com três exceções mantidas manualmente (não vêm do SUS360 nem de script): `dados/Relacao_cirugiasROL.xlsx` (Código SIGTAP → Especialidade), `dados/Base_pagamento/*.xlsx` (pagamentos da Portaria 9.810, extraído do [Painel FAF/InvestSUS](https://investsuspaineis.saude.gov.br/extensions/CGIN_Painel_FAF/CGIN_Painel_FAF.html)) e `dados/PORTARIA_12.174_UF.xlsx` (limite por UF, Anexo da Portaria 9.810 com a redação dada pela Portaria 12.174/2026).
 
 A aba "Variação Cirurgias" é diferente: os 3 mapas (`.gpkg`) vêm de um terceiro projeto irmão, `Analise_Espacial/app_semaforo`, já prontos com geometria e variação % calculada — este painel só copia e lê.
 
@@ -63,15 +64,15 @@ Cirurgia/resultados/02_monitoramento/tabelas/      serie_completa_*, serie_anos_
 Cirurgia/resultados/02_monitoramento/tabelas/      cirurgias_ranking_procedimento_uf_*, cirurgias_ranking_secundario_uf_* (script 11)
 Cirurgia/resultados/bases_processadas/fisico/      cirurgias_mensal_procedimento_rol_*.csv
 OCI/resultados/                                    planilha_OCI_UF_mes_*.xlsx, oci_mensal_especialidade_componente_*.csv, oci_ranking_procedimento_*.csv
-Consultas_Exames/resultados/consultas_exames/tabelas/  painel_consultas_uf.csv, painel_consultas_municipio.csv, painel_exames_estrategicos_uf.csv, painel_exames_estrategicos_municipio.csv
+Consultas_Exames/resultados/consultas_exames/tabelas/  painel_consultas_uf.csv, painel_consultas_municipio.csv, painel_exames_estrategicos_uf.csv, painel_exames_estrategicos_municipio.csv, painel_exames_ranking_procedimento_uf.csv
 Analise_Espacial/app_semaforo/dados/               tab_br/tab_regiao/tab_municipio *.gpkg
                           │
                           ▼   sincronizado toda vez que o app abre (sessão nova)
-              Painel_Ciru_OCI/dados/processados/   (.gpkg ficam em processados/semaforo/)
+              Painel_Monitoramento/dados/processados/   (.gpkg ficam em processados/semaforo/)
 
-Painel_Ciru_OCI/dados/Relacao_cirugiasROL.xlsx           ← mantido manualmente, não sincroniza sozinho
-Painel_Ciru_OCI/dados/BaseValorliquidoPortaria9810.xlsx  ← mantido manualmente, não sincroniza sozinho
-Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente, não sincroniza sozinho
+Painel_Monitoramento/dados/Relacao_cirugiasROL.xlsx    ← mantido manualmente, não sincroniza sozinho
+Painel_Monitoramento/dados/Base_pagamento/*.xlsx       ← mantido manualmente, extração do Painel FAF/InvestSUS, não sincroniza sozinho
+Painel_Monitoramento/dados/PORTARIA_12.174_UF.xlsx     ← mantido manualmente, não sincroniza sozinho
 ```
 
 `dados/processados/` (ignorada pelo Git) é a principal fonte que o `app.R` lê:
@@ -92,12 +93,13 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
 ├── Analise_Espacial/
 │   └── app_semaforo/
 │       └── dados/                             # tab_br/tab_regiao/tab_municipio *.gpkg
-└── Painel_Ciru_OCI/
+└── Painel_Monitoramento/
     ├── app.R
     ├── dados/
     │   ├── Relacao_cirugiasROL.xlsx           # mantido manualmente, não ignorado pelo Git
-    │   ├── BaseValorliquidoPortaria9810.xlsx  # mantido manualmente, não ignorado pelo Git
-    │   ├── PORTARIA_9.810_UF.xlsx             # mantido manualmente, não ignorado pelo Git
+    │   ├── Base_pagamento/                    # mantido manualmente, ignorado pelo Git (marcar na mão ao publicar)
+    │   │   └── *.xlsx                         # extração do Painel FAF/InvestSUS — nome muda a cada upload
+    │   ├── PORTARIA_12.174_UF.xlsx            # mantido manualmente, ignorado pelo Git (marcar na mão ao publicar)
     │   └── processados/                       # gerado automaticamente, ignorado pelo Git
     │       └── semaforo/                      # os 3 .gpkg copiados de Analise_Espacial
     ├── README.md
@@ -107,7 +109,7 @@ Painel_Ciru_OCI/dados/PORTARIA_9.810_UF.xlsx             ← mantido manualmente
 
 ## Executar localmente
 
-Abra `Painel_Ciru_OCI.Rproj` no RStudio e rode:
+Abra `Painel_Monitoramento.Rproj` no RStudio e rode:
 
 ```r
 shiny::runApp()
